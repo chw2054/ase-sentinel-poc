@@ -6,11 +6,9 @@ status or a generic failure name, never the header value or response body.
 
 from __future__ import annotations
 
-import os
 import uuid
 
 from sentinel_waf_block.engine import AuthenticationError, CommentError, WafGetError, WafPutError
-from sentinel_waf_block.models import BLOCK_POLICY_TAG
 
 _ARM = "https://management.azure.com"
 _SCOPE = "https://management.azure.com/.default"
@@ -58,48 +56,6 @@ class ArmWafClient:
             raise WafPutError("PUT was accepted but did not finish; read the policy before retrying")
         if response.status_code not in {200, 201}:
             raise WafPutError(f"PUT failed with HTTP {response.status_code}")
-
-    def tagged_policy_ids(self, policy_resource_id: str, api_version: str) -> list[str]:
-        """Other WAF policies in the same resource group that carry the block-list tag."""
-
-        parts = policy_resource_id.split("/")
-        if len(parts) < 5 or parts[1] != "subscriptions" or parts[3] != "resourceGroups":
-            return []
-        collection = (
-            f"/subscriptions/{parts[2]}/resourceGroups/{parts[4]}/providers/"
-            "Microsoft.Network/applicationGatewayWebApplicationFirewallPolicies"
-        )
-        response = self._request(
-            "GET",
-            collection,
-            api_version,
-            None,
-            WafGetError,
-            timeout_seconds=_GET_READ_TIMEOUT_SECONDS,
-            attempts=_GET_ATTEMPTS,
-        )
-        if response.status_code != 200:
-            raise WafGetError(f"GET failed with HTTP {response.status_code}")
-        try:
-            document = response.json()
-        except ValueError as exc:
-            raise WafGetError("GET returned non-JSON") from exc
-        tag = os.environ.get("BLOCK_POLICY_TAG", BLOCK_POLICY_TAG)
-        found: list[str] = []
-        for item in document.get("value") or []:
-            if not isinstance(item, dict):
-                continue
-            tags = item.get("tags") or {}
-            if not isinstance(tags, dict):
-                continue
-            marked = any(
-                str(name).casefold() == tag.casefold() and str(value).lower() in {"true", "1", "yes"}
-                for name, value in tags.items()
-            )
-            resource_id = item.get("id")
-            if marked and isinstance(resource_id, str) and resource_id.startswith("/"):
-                found.append(resource_id)
-        return found
 
     def _request(
         self,

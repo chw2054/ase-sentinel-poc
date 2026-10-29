@@ -15,7 +15,7 @@ This is a reference implementation, not a production deployment. A dry-run deplo
 3. A scheduled analytics rule matches the simulated probe and opens an incident with the source IP as an entity.
 4. An automation rule starts a Logic App playbook.
 5. The playbook forwards the incident IP entities to a Python function. The function validates the IP, refuses protected ranges, and in the default configuration only records what it would block.
-6. Opt-in mode adds the IP to one WAF custom rule and writes the result back on the incident.
+6. Opt-in mode adds the IP to one WAF block list custom rule. When that rule already holds 600 addresses, the function uses another rule on the same policy or creates one, then writes the result back on the incident.
 
 Application Gateway is the **test rig**, because ASE has not confirmed which WAF product is in production. Front Door is a substitutable query and policy shape. This repository does not create Front Door and does not turn on Front Door diagnostics.
 
@@ -192,10 +192,10 @@ Incident created
   -> POST /api/SentinelWafAutoBlock
   -> reject empty, non-canonical, and protected addresses
   -> GET the WAF policy (read)
-  -> skip addresses already on SentinelAutoBlock
-  -> skip the write when the list would pass maximumBlockEntries
+  -> skip addresses already on any SentinelAutoBlock custom rule
+  -> choose a rule still below 600, or create the next rule on the same policy
   -> if autoBlockEnabled is not exactly true: comment and stop
-  -> if autoBlockEnabled is true: PUT the one custom rule, then comment
+  -> if autoBlockEnabled is true: PUT that one custom rule, then comment
 ```
 
 The function writes the decision comment. The Logic App writes a comment when entity lookup or the function call fails, and that comment does not say the address was blocked. A failed PUT comment says not to assume the address was blocked.

@@ -7,20 +7,18 @@ from dataclasses import replace
 from typing import Protocol
 
 from sentinel_waf_block.addresses import (
+    canonical_block_entry,
     canonical_host,
+    entry_protection_reason,
     parse_protected_ranges,
     protection_reason,
 )
 from sentinel_waf_block.comments import render
 from sentinel_waf_block.decision import (
     enforcement_enabled,
-    exceeds_capacity,
-    merge_addresses,
     override_enabled,
 )
 from sentinel_waf_block.models import (
-    BLOCK_POLICY_TAG,
-    MATCH_VALUES_PER_POLICY,
     PROVIDERS,
     STATUS_ALREADY_BLOCKED,
     STATUS_BLOCKED,
@@ -28,7 +26,9 @@ from sentinel_waf_block.models import (
     STATUS_COMMENT,
     STATUS_DRY_RUN,
     STATUS_GET,
+    STATUS_NOT_LISTED,
     STATUS_NOTHING,
+    STATUS_REMOVED,
     STATUS_PROVIDER,
     STATUS_PUT,
     STATUS_RANGES,
@@ -39,7 +39,16 @@ from sentinel_waf_block.models import (
     Rejection,
     Result,
 )
-from sentinel_waf_block.waf_arm import PolicyShapeError, build_put_body, read_policy
+from sentinel_waf_block.waf_arm import (
+    BlockList,
+    PolicyShapeError,
+    PolicyView,
+    RuleTarget,
+    build_put_body,
+    ordered_block_lists,
+    read_policy,
+    select_block_list,
+)
 
 log = logging.getLogger("sentinel_waf_block")
 
@@ -98,8 +107,15 @@ class Engine:
     def execute(self, incident: Incident, config: Config) -> Result:
         result = self._decide(incident, config)
         shown = config
+        updates: dict[str, object] = {}
         if result.policy_resource_id:
-            shown = replace(config, waf_policy_resource_id=result.policy_resource_id)
+            updates["waf_policy_resource_id"] = result.policy_resource_id
+        if result.written_rule:
+            updates["block_rule_name"] = result.written_rule
+        if result.written_priority:
+            updates["block_rule_priority"] = result.written_priority
+        if updates:
+            shown = replace(config, **updates)
         result = replace(result, comment=render(result, incident, shown))
         result = self._deliver_comment(incident, result)
         result = self._deliver_notify(incident, config, result)
@@ -114,6 +130,123 @@ class Engine:
             len(result.rejected_addresses),
         )
         return result
+
+    def add_entry(self, raw: str, config: Config) -> Result:
+        """Add one host or CIDR to a block list rule. Does not comment an incident."""
+
+        parsed = canonical_block_entry(raw)
+        if parsed.canonical is None:
+            return _result(STATUS_VALIDATION, reason=parsed.reason or "invalid")
+        networks, invalid_ranges = parse_protected_ranges(config.protected_ip_ranges)
+        if invalid_ranges:
+            return _result(
+                STATUS_RANGES,
+                reason="protectedIpRanges cannot be evaluated",
+                invalid_protected_ranges=invalid_ranges,
+            )
+        protected = entry_protection_reason(
+            parsed.canonical,
+            networks,
+            override=override_enabled(config.override_protected_ranges),
+        )
+        if protected is not None:
+            return _result(
+                STATUS_VALIDATION,
+                candidate_addresses=(parsed.canonical,),
+                rejected_addresses=(Rejection(parsed.canonical, protected),),
+                reason=protected,
+            )
+        view, failure = self._policy_view(config, [parsed.canonical], ())
+        if failure is not None:
+            return failure
+        assert view is not None
+        if any(parsed.canonical in block.values for block in view.block_lists):
+            holder = _holder(view, config.block_rule_name, [parsed.canonical])
+            return _result(
+                STATUS_ALREADY_BLOCKED,
+                candidate_addresses=(parsed.canonical,),
+                policy_resource_id=config.waf_policy_resource_id,
+                written_rule=holder.name if holder is not None else "",
+                written_priority=holder.priority if holder is not None else 0,
+                reason="address is already listed",
+            )
+        target = select_block_list(view, [parsed.canonical], config)
+        if target is None:
+            return _result(
+                STATUS_CAPACITY,
+                candidate_addresses=(parsed.canonical,),
+                new_addresses=(parsed.canonical,),
+                policy_resource_id=config.waf_policy_resource_id,
+                reason=f"no block list can take {parsed.canonical}",
+            )
+        base = _result(
+            STATUS_DRY_RUN,
+            candidate_addresses=(parsed.canonical,),
+            new_addresses=target.added,
+            existing_count=len(target.merged) - len(target.added),
+            resulting_count=len(target.merged),
+            policy_resource_id=config.waf_policy_resource_id,
+            written_rule=target.name,
+            written_priority=target.priority,
+        )
+        if not enforcement_enabled(config.auto_block_enabled):
+            return base
+        return self._put(config, view, target, base, STATUS_BLOCKED)
+
+    def remove_entry(self, raw: str, config: Config) -> Result:
+        """Remove one stored host or CIDR. An emptied rule is dropped, not left blank."""
+
+        if raw == "" or any(character in raw for character in "\r\n") or len(raw) > 100:
+            return _result(STATUS_VALIDATION, reason="address must be one IP or CIDR")
+        view, failure = self._policy_view(config, [raw], ())
+        if failure is not None:
+            return failure
+        assert view is not None
+        found = _stored_value(view, config.block_rule_name, raw)
+        if found is None:
+            parsed = canonical_block_entry(raw)
+            if parsed.canonical is not None and parsed.canonical != raw:
+                found = _stored_value(view, config.block_rule_name, parsed.canonical)
+            if found is None:
+                if parsed.canonical is None:
+                    return _result(STATUS_VALIDATION, reason=parsed.reason or "invalid")
+                return _result(
+                    STATUS_NOT_LISTED,
+                    candidate_addresses=(parsed.canonical,),
+                    policy_resource_id=config.waf_policy_resource_id,
+                    reason="address is not on a block list",
+                )
+        block, stored = found
+        remaining = tuple(value for value in block.values if value != stored)
+        target = RuleTarget(block.name, block.priority, remaining, (stored,), False)
+        base = _result(
+            STATUS_DRY_RUN,
+            candidate_addresses=(stored,),
+            new_addresses=(stored,),
+            existing_count=len(block.values),
+            resulting_count=len(remaining),
+            policy_resource_id=config.waf_policy_resource_id,
+            written_rule=block.name,
+            written_priority=block.priority,
+        )
+        if not enforcement_enabled(config.auto_block_enabled):
+            return base
+        return self._put(config, view, target, base, STATUS_REMOVED)
+
+    def _put(self, config: Config, view, target, base: Result, done: str) -> Result:
+        body = build_put_body(view, target, config)
+        try:
+            self._waf.put_policy(
+                config.waf_policy_resource_id,
+                config.arm_api_version,
+                body,
+                timeout_seconds=120,
+            )
+        except AuthenticationError:
+            return replace(base, status=STATUS_PUT, changed=False, reason="authentication failed")
+        except WafPutError as exc:
+            return replace(base, status=STATUS_PUT, changed=False, reason=_safe_text(exc))
+        return replace(base, status=done, changed=True, reason="")
 
     def _decide(self, incident: Incident, config: Config) -> Result:
         if type(config.maximum_block_entries) is not int or config.maximum_block_entries < 1:
@@ -169,146 +302,93 @@ class Engine:
                 rejected_addresses=rejections,
                 reason="wafPolicyResourceId is missing",
             )
-        views, failure = self._policy_views(config, enforceable, rejections)
+        view, failure = self._policy_view(config, enforceable, rejections)
         if failure is not None:
             return failure
-        plans = []
-        full: list[str] = []
-        for policy_id, view in views:
-            # Copy the address onto every policy that can still take it. A
-            # policy at 600 is left unchanged. One gateway enforces only the
-            # policy attached to it, so the duplicate is what makes the block
-            # apply on each of those gateways.
-            missing = [address for address in enforceable if address not in view.existing_values]
-            if not missing:
-                continue
-            merged, added = merge_addresses(list(view.existing_values), missing)
-            if exceeds_capacity(merged, MATCH_VALUES_PER_POLICY):
-                full.append(policy_id)
-                continue
-            plans.append((policy_id, view, merged, added))
-        if not plans:
-            policy_id, view = views[0]
-            if full:
-                return _result(
-                    STATUS_CAPACITY,
-                    candidate_addresses=tuple(enforceable),
-                    new_addresses=tuple(address for address in enforceable if address not in view.existing_values),
-                    rejected_addresses=rejections,
-                    existing_count=len(view.existing_values),
-                    resulting_count=len(view.existing_values) + len(enforceable),
-                    policy_resource_id=policy_id,
-                    reason=(
-                        f"every block policy that is missing an address already holds "
-                        f"{MATCH_VALUES_PER_POLICY} addresses; "
-                        f"tag another policy {BLOCK_POLICY_TAG}=true; "
-                        f"proposed {', '.join(address for address in enforceable if address not in view.existing_values)}"
-                    ),
-                )
+        assert view is not None
+        # One address is written to one custom rule on this policy. Any of
+        # those rules blocks traffic, because the gateway uses this policy.
+        listed = {value for block in view.block_lists for value in block.values}
+        new = [address for address in enforceable if address not in listed]
+        policy_id = config.waf_policy_resource_id
+        if not new:
+            holder = _holder(view, config.block_rule_name, enforceable)
             return _result(
                 STATUS_ALREADY_BLOCKED,
                 candidate_addresses=tuple(enforceable),
                 rejected_addresses=rejections,
-                existing_count=len(view.existing_values),
-                resulting_count=len(view.existing_values),
+                existing_count=len(holder.values) if holder is not None else 0,
+                resulting_count=len(holder.values) if holder is not None else 0,
                 policy_resource_id=policy_id,
+                written_rule=holder.name if holder is not None else config.block_rule_name,
+                written_priority=holder.priority if holder is not None else config.block_rule_priority,
                 reason="address is already listed",
             )
-        added_all: list[str] = []
-        seen_added: set[str] = set()
-        for _policy_id, _view, _merged, added in plans:
-            for address in added:
-                if address not in seen_added:
-                    seen_added.add(address)
-                    added_all.append(address)
-        written_ids = [policy_id for policy_id, _view, _merged, _added in plans]
-        _policy_id, view, merged, _added = plans[0]
+        target = select_block_list(view, new, config)
+        if target is None:
+            first = ordered_block_lists(view, config.block_rule_name)
+            existing = len(first[0].values) if first else 0
+            return _result(
+                STATUS_CAPACITY,
+                candidate_addresses=tuple(enforceable),
+                new_addresses=tuple(new),
+                rejected_addresses=rejections,
+                existing_count=existing,
+                resulting_count=existing + len(new),
+                policy_resource_id=policy_id,
+                reason=(
+                    f"no block list can take another address and no new custom rule "
+                    f"can be added; proposed {', '.join(new)}"
+                ),
+            )
         base = _result(
             STATUS_DRY_RUN,
             candidate_addresses=tuple(enforceable),
-            new_addresses=tuple(added_all),
+            new_addresses=target.added,
             rejected_addresses=rejections,
-            existing_count=len(view.existing_values),
-            resulting_count=len(merged),
-            policy_resource_id=", ".join(written_ids),
+            existing_count=len(target.merged) - len(target.added),
+            resulting_count=len(target.merged),
+            policy_resource_id=policy_id,
+            written_rule=target.name,
+            written_priority=target.priority,
         )
         if not enforcement_enabled(config.auto_block_enabled):
             return base
-        written: list[str] = []
-        for policy_id, view, merged, _added in plans:
-            body = build_put_body(view, merged, config)
-            try:
-                self._waf.put_policy(policy_id, config.arm_api_version, body, timeout_seconds=120)
-            except AuthenticationError:
-                return replace(
-                    base,
-                    status=STATUS_PUT,
-                    changed=bool(written),
-                    policy_resource_id=", ".join(written),
-                    reason="authentication failed",
-                )
-            except WafPutError as exc:
-                return replace(
-                    base,
-                    status=STATUS_PUT,
-                    changed=bool(written),
-                    policy_resource_id=", ".join(written),
-                    reason=_safe_text(exc),
-                )
-            written.append(policy_id)
-        return replace(base, status=STATUS_BLOCKED, changed=True, policy_resource_id=", ".join(written), reason="")
-
-    def _policy_views(self, config: Config, enforceable: list[str], rejections: tuple[Rejection, ...]):
-        views = []
-        for index, policy_id in enumerate(self._policy_ids(config)):
-            try:
-                document = self._waf.get_policy(policy_id, config.arm_api_version)
-                view = read_policy(document, config.waf_provider, config.block_rule_name)
-            except AuthenticationError:
-                if index == 0:
-                    return [], _result(
-                        STATUS_GET,
-                        candidate_addresses=tuple(enforceable),
-                        rejected_addresses=rejections,
-                        reason="authentication failed",
-                    )
-                continue
-            except WafGetError as exc:
-                if index == 0:
-                    return [], _result(
-                        STATUS_GET,
-                        candidate_addresses=tuple(enforceable),
-                        rejected_addresses=rejections,
-                        reason=_safe_text(exc),
-                    )
-                continue
-            except PolicyShapeError as exc:
-                if index == 0:
-                    return [], _result(
-                        STATUS_SHAPE,
-                        candidate_addresses=tuple(enforceable),
-                        rejected_addresses=rejections,
-                        reason=_safe_text(exc),
-                    )
-                continue
-            views.append((policy_id, view))
-        return views, None
-
-    def _policy_ids(self, config: Config) -> list[str]:
-        found = [config.waf_policy_resource_id]
-        finder = getattr(self._waf, "tagged_policy_ids", None)
-        if finder is None:
-            return found
+        body = build_put_body(view, target, config)
         try:
-            extra = finder(config.waf_policy_resource_id, config.arm_api_version)
-        except (AuthenticationError, WafGetError):
-            return found
-        seen = {config.waf_policy_resource_id.casefold()}
-        for item in extra or []:
-            if isinstance(item, str) and item.startswith("/") and item.casefold() not in seen:
-                seen.add(item.casefold())
-                found.append(item)
-        return found
+            self._waf.put_policy(policy_id, config.arm_api_version, body, timeout_seconds=120)
+        except AuthenticationError:
+            return replace(base, status=STATUS_PUT, changed=False, reason="authentication failed")
+        except WafPutError as exc:
+            return replace(base, status=STATUS_PUT, changed=False, reason=_safe_text(exc))
+        return replace(base, status=STATUS_BLOCKED, changed=True, reason="")
+
+    def _policy_view(self, config: Config, enforceable: list[str], rejections: tuple[Rejection, ...]):
+        try:
+            document = self._waf.get_policy(config.waf_policy_resource_id, config.arm_api_version)
+            return read_policy(document, config.waf_provider, config.block_rule_name), None
+        except AuthenticationError:
+            failure = _result(
+                STATUS_GET,
+                candidate_addresses=tuple(enforceable),
+                rejected_addresses=rejections,
+                reason="authentication failed",
+            )
+        except WafGetError as exc:
+            failure = _result(
+                STATUS_GET,
+                candidate_addresses=tuple(enforceable),
+                rejected_addresses=rejections,
+                reason=_safe_text(exc),
+            )
+        except PolicyShapeError as exc:
+            failure = _result(
+                STATUS_SHAPE,
+                candidate_addresses=tuple(enforceable),
+                rejected_addresses=rejections,
+                reason=_safe_text(exc),
+            )
+        return None, failure
 
     def _deliver_comment(self, incident: Incident, result: Result) -> Result:
         if self._comments is None:
@@ -349,6 +429,20 @@ _NOTIFY_EVENTS = {
     # sees the proposal, the approver still gates the actual block.
     STATUS_DRY_RUN: "would_block",
 }
+
+
+def _stored_value(view: PolicyView, base_name: str, address: str) -> tuple[BlockList, str] | None:
+    for block in ordered_block_lists(view, base_name):
+        if address in block.values:
+            return block, address
+    return None
+
+
+def _holder(view: PolicyView, base_name: str, addresses: list[str]) -> BlockList | None:
+    for block in ordered_block_lists(view, base_name):
+        if any(address in block.values for address in addresses):
+            return block
+    return None
 
 
 def _result(status: str, **kwargs: object) -> Result:

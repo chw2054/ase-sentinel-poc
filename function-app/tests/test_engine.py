@@ -195,8 +195,25 @@ def _full_policy() -> list[str]:
     return [f"198.51.{index // 256}.{index % 256}" for index in range(1, 601)]
 
 
+def _named_block(name: str, priority: int, values: list[str]) -> dict:
+    rule = agw_block_rule(values)
+    rule["name"] = name
+    rule["priority"] = priority
+    return rule
+
+
+def _no_free_priority(values: list[str]) -> dict:
+    rules = []
+    for priority in range(1, 101):
+        if priority == 10:
+            rules.append(agw_block_rule(values))
+        else:
+            rules.append({"name": f"Occupied{priority}", "priority": priority, "matchConditions": []})
+    return agw_policy(*rules)
+
+
 def test_capacity_counts_existing_values_and_rejects_non_ipv4() -> None:
-    document = agw_policy(agw_block_rule(_full_policy()))
+    document = _no_free_priority(_full_policy())
     app, waf, _comments = engine(FakeWaf(document))
     result = app.execute(
         incident("203.0.113.5", "2001:db9::1"),
@@ -213,93 +230,68 @@ def test_capacity_counts_existing_values_and_rejects_non_ipv4() -> None:
     assert "Blocked IP:" not in result.comment
 
 
-def test_full_policy_writes_the_next_tagged_policy() -> None:
-    primary = config().waf_policy_resource_id
-    second = primary + "-2"
-    full = agw_policy(agw_block_rule(_full_policy()))
-    empty = agw_policy(agw_block_rule([]))
-
-    class _Split(FakeWaf):
-        def __init__(self) -> None:
-            super().__init__(full)
-            self.docs = {primary: full, second: empty}
-            self.written: list[str] = []
-
-        def get_policy(self, resource_id: str, api_version: str) -> dict:
-            self.gets.append((resource_id, api_version))
-            return copy.deepcopy(self.docs[resource_id])
-
-        def tagged_policy_ids(self, policy_resource_id: str, api_version: str) -> list[str]:
-            return [second]
-
-        def put_policy(self, resource_id: str, api_version: str, body: dict, timeout_seconds: float = 120) -> None:
-            self.written.append(resource_id)
-            self.puts.append(body)
-
-    waf = _Split()
-    app, _waf, _comments = engine(waf)
+def test_full_rule_creates_the_next_block_list() -> None:
+    document = agw_policy(probe_rule(), agw_block_rule(_full_policy()))
+    app, waf, _comments = engine(FakeWaf(document))
     result = app.execute(incident("203.0.113.5"), config(auto_block_enabled=True))
     assert result.status == "blocked"
-    assert result.policy_resource_id == second
-    assert waf.written == [second]
-    values = waf.puts[0]["properties"]["customRules"][0]["matchConditions"][0]["matchValues"]
-    assert values == ["203.0.113.5"]
+    assert result.written_rule == "SentinelAutoBlock-2"
+    assert result.written_priority == 11
+    assert result.policy_resource_id == config().waf_policy_resource_id
+    assert waf.gets == [(config().waf_policy_resource_id, "2024-05-01")]
+    rules = waf.puts[0]["properties"]["customRules"]
+    by_name = {rule["name"]: rule for rule in rules}
+    assert by_name["SentinelAutoBlock"]["matchConditions"][0]["matchValues"] == _full_policy()
+    assert by_name["SentinelAutoBlock-2"]["priority"] == 11
+    assert by_name["SentinelAutoBlock-2"]["matchConditions"][0]["matchValues"] == ["203.0.113.5"]
+    assert by_name["PocSimulatedProbe"] == probe_rule()
+    assert "Blocked IP: 203.0.113.5" in result.comment
+    assert "SentinelAutoBlock-2" in result.comment
 
 
-def test_address_is_written_to_every_policy_that_has_room() -> None:
-    primary = config().waf_policy_resource_id
-    second = primary + "-2"
-    first = agw_policy(agw_block_rule(["198.51.100.4"]))
-    second_doc = agw_policy(agw_block_rule(["198.51.100.8"]))
-
-    class _Both(FakeWaf):
-        def __init__(self) -> None:
-            super().__init__(first)
-            self.docs = {primary: first, second: second_doc}
-            self.written: list[str] = []
-
-        def get_policy(self, resource_id: str, api_version: str) -> dict:
-            self.gets.append((resource_id, api_version))
-            return copy.deepcopy(self.docs[resource_id])
-
-        def tagged_policy_ids(self, policy_resource_id: str, api_version: str) -> list[str]:
-            return [second]
-
-        def put_policy(self, resource_id: str, api_version: str, body: dict, timeout_seconds: float = 120) -> None:
-            self.written.append(resource_id)
-            self.puts.append(body)
-
-    waf = _Both()
-    app, _waf, _comments = engine(waf)
+def test_full_rule_uses_the_next_block_list_that_has_room() -> None:
+    second = _named_block("SentinelAutoBlock-2", 11, ["198.51.100.8"])
+    document = agw_policy(probe_rule(), agw_block_rule(_full_policy()), second)
+    app, waf, _comments = engine(FakeWaf(document))
     result = app.execute(incident("203.0.113.5"), config(auto_block_enabled=True))
     assert result.status == "blocked"
-    assert result.policy_resource_id == f"{primary}, {second}"
-    assert waf.written == [primary, second]
-    for body in waf.puts:
-        values = body["properties"]["customRules"][0]["matchConditions"][0]["matchValues"]
-        assert "203.0.113.5" in values
-    assert waf.puts[0]["properties"]["customRules"][0]["matchConditions"][0]["matchValues"] == [
-        "198.51.100.4",
-        "203.0.113.5",
-    ]
-    assert waf.puts[1]["properties"]["customRules"][0]["matchConditions"][0]["matchValues"] == [
+    assert result.written_rule == "SentinelAutoBlock-2"
+    rules = waf.puts[0]["properties"]["customRules"]
+    names = [rule["name"] for rule in rules]
+    assert "SentinelAutoBlock-3" not in names
+    by_name = {rule["name"]: rule for rule in rules}
+    assert by_name["SentinelAutoBlock"]["matchConditions"][0]["matchValues"] == _full_policy()
+    assert by_name["SentinelAutoBlock-2"]["matchConditions"][0]["matchValues"] == [
         "198.51.100.8",
         "203.0.113.5",
     ]
+    assert by_name["PocSimulatedProbe"] == probe_rule()
 
 
-def test_tag_lookup_failure_still_writes_the_configured_policy() -> None:
-    class _Blind(FakeWaf):
-        def tagged_policy_ids(self, policy_resource_id: str, api_version: str) -> list[str]:
-            raise WafGetError("GET failed with HTTP 403")
-
-    waf = _Blind(agw_policy(probe_rule()))
-    app, _waf, _comments = engine(waf)
+def test_address_is_written_to_the_first_block_list_with_room() -> None:
+    second = _named_block("SentinelAutoBlock-2", 11, ["198.51.100.8"])
+    document = agw_policy(agw_block_rule(["198.51.100.4"]), second, probe_rule())
+    app, waf, _comments = engine(FakeWaf(document))
     result = app.execute(incident("203.0.113.5"), config(auto_block_enabled=True))
     assert result.status == "blocked"
-    assert result.policy_resource_id == config().waf_policy_resource_id
-    assert waf.gets == [(config().waf_policy_resource_id, "2024-05-01")]
-    assert len(waf.puts) == 1
+    assert result.written_rule == "SentinelAutoBlock"
+    by_name = {rule["name"]: rule for rule in waf.puts[0]["properties"]["customRules"]}
+    assert by_name["SentinelAutoBlock"]["matchConditions"][0]["matchValues"] == [
+        "198.51.100.4",
+        "203.0.113.5",
+    ]
+    assert by_name["SentinelAutoBlock-2"]["matchConditions"][0]["matchValues"] == ["198.51.100.8"]
+
+
+def test_address_on_any_block_list_is_already_blocked() -> None:
+    second = _named_block("SentinelAutoBlock-2", 11, ["203.0.113.5"])
+    document = agw_policy(agw_block_rule(["198.51.100.4"]), second)
+    app, waf, _comments = engine(FakeWaf(document))
+    result = app.execute(incident("203.0.113.5"), config(auto_block_enabled=True))
+    assert result.status == "already-blocked"
+    assert result.written_rule == "SentinelAutoBlock-2"
+    assert waf.puts == []
+    assert "already on custom rule SentinelAutoBlock-2" in result.comment
 
 
 def test_get_failure_has_no_would_block_line() -> None:
@@ -346,6 +338,68 @@ def test_unexpected_policy_shape_does_not_put() -> None:
     assert result.status == "policy-shape-invalid"
     assert waf.puts == []
     assert "Would block IP:" not in result.comment
+
+
+def test_manual_add_stores_a_canonical_cidr_on_one_rule() -> None:
+    document = agw_policy(probe_rule(), agw_block_rule(["198.51.100.4"]))
+    app, waf, comments = engine(FakeWaf(document))
+    result = app.add_entry("203.0.113.5/24", config(auto_block_enabled=True))
+    assert result.status == "blocked"
+    assert result.changed is True
+    assert result.new_addresses == ("203.0.113.0/24",)
+    assert result.written_rule == "SentinelAutoBlock"
+    values = waf.puts[0]["properties"]["customRules"][0]["matchConditions"][0]["matchValues"]
+    assert values == ["198.51.100.4", "203.0.113.0/24"]
+    assert comments.messages == []
+
+
+def test_manual_add_rejects_a_protected_cidr_without_put() -> None:
+    app, waf, _comments = engine()
+    result = app.add_entry("10.1.2.0/24", config(auto_block_enabled=True))
+    assert result.status == "validation-failed"
+    assert result.changed is False
+    assert waf.gets == []
+    assert waf.puts == []
+
+
+def test_manual_remove_drops_one_address_and_keeps_the_rule() -> None:
+    second = _named_block("SentinelAutoBlock-2", 11, ["203.0.113.9", "203.0.113.0/24"])
+    document = agw_policy(probe_rule(), agw_block_rule(["198.51.100.4"]), second)
+    app, waf, comments = engine(FakeWaf(document))
+    result = app.remove_entry("203.0.113.0/24", config(auto_block_enabled=True))
+    assert result.status == "removed"
+    assert result.written_rule == "SentinelAutoBlock-2"
+    by_name = {rule["name"]: rule for rule in waf.puts[0]["properties"]["customRules"]}
+    assert by_name["SentinelAutoBlock"]["matchConditions"][0]["matchValues"] == ["198.51.100.4"]
+    assert by_name["SentinelAutoBlock-2"]["matchConditions"][0]["matchValues"] == ["203.0.113.9"]
+    assert by_name["PocSimulatedProbe"] == probe_rule()
+    assert comments.messages == []
+
+
+def test_manual_remove_drops_an_empty_rule() -> None:
+    second = _named_block("SentinelAutoBlock-2", 11, ["203.0.113.9"])
+    document = agw_policy(agw_block_rule(["198.51.100.4"]), second, probe_rule())
+    app, waf, _comments = engine(FakeWaf(document))
+    result = app.remove_entry("203.0.113.9", config(auto_block_enabled=True))
+    assert result.status == "removed"
+    names = [rule["name"] for rule in waf.puts[0]["properties"]["customRules"]]
+    assert names == ["SentinelAutoBlock", "PocSimulatedProbe"]
+
+
+def test_manual_remove_of_a_missing_address_does_not_put() -> None:
+    app, waf, _comments = engine(FakeWaf(agw_policy(agw_block_rule(["198.51.100.4"]))))
+    result = app.remove_entry("203.0.113.5", config(auto_block_enabled=True))
+    assert result.status == "not-listed"
+    assert result.changed is False
+    assert waf.puts == []
+
+
+def test_manual_remove_dry_run_does_not_put() -> None:
+    app, waf, _comments = engine(FakeWaf(agw_policy(agw_block_rule(["203.0.113.5"]))))
+    result = app.remove_entry("203.0.113.5", config())
+    assert result.status == "dry-run"
+    assert result.new_addresses == ("203.0.113.5",)
+    assert waf.puts == []
 
 
 def test_front_door_put_uses_negate_condition_and_sku() -> None:

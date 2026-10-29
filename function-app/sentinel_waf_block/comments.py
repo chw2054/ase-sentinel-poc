@@ -6,7 +6,6 @@ import html
 
 from sentinel_waf_block.models import (
     APPLICATION_GATEWAY,
-    BLOCK_POLICY_TAG,
     MATCH_VALUES_PER_POLICY,
     STATUS_ALREADY_BLOCKED,
     STATUS_BLOCKED,
@@ -45,15 +44,15 @@ def render(result: Result, incident: Incident, config: Config) -> str:
                 "<p>Provider: "
                 f"{provider}. Policy: {policy}. Custom rule that would be updated: {rule}. "
                 "Resulting list size if blocking were enabled: "
-                f"{size} of {MATCH_VALUES_PER_POLICY} on each policy that still has room.</p>"
+                f"{size} of {MATCH_VALUES_PER_POLICY} on this custom rule.</p>"
             )
         else:
             kind = "variable" if config.waf_provider == APPLICATION_GATEWAY else "matchVariable"
             parts.append(
                 f"<p>Custom rule {rule}, {kind} RemoteAddr, operator IPMatch, action Block, "
                 f"priority {config.block_rule_priority}. List size {size} of "
-                f"{MATCH_VALUES_PER_POLICY} on each policy that still has room. "
-                f"Other custom rules were kept. Policies: {policy}.</p>"
+                f"{MATCH_VALUES_PER_POLICY} on this custom rule. Other custom rules were kept. "
+                f"Policy: {policy}.</p>"
             )
             if config.waf_provider == APPLICATION_GATEWAY:
                 parts.append("<p>Read-only policy links were not sent back on the PUT.</p>")
@@ -110,8 +109,8 @@ def _headline(
     if status == STATUS_CAPACITY:
         return (
             "<p><strong>ASE POC playbook refused to block.</strong> "
-            f"Every block policy already holds {MATCH_VALUES_PER_POLICY} addresses. "
-            f"Tag another WAF policy {BLOCK_POLICY_TAG}=true to extend the list. "
+            f"No block list custom rule can take another address, and a new custom rule "
+            f"cannot be added. Each rule holds at most {MATCH_VALUES_PER_POLICY} addresses. "
             "The WAF policy was not changed.</p>"
         )
     if status == STATUS_RANGES:

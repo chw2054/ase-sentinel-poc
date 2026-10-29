@@ -117,6 +117,49 @@ def _parse_one_range(entry: str) -> ProtectedNetwork | str:
     return ProtectedNetwork(entry, network)
 
 
+def canonical_block_entry(value: str) -> Classification:
+    """One IPv4 host or CIDR for a manual block-list edit.
+
+    A host is stored as dotted decimal. A CIDR is stored as the network
+    address plus its prefix, so 203.0.113.5/24 becomes 203.0.113.0/24.
+    """
+
+    if _dirty(value, allow_slash=True) or value.count("/") > 1:
+        return Classification(value, None, REASON_DIRTY)
+    if "/" not in value:
+        return canonical_host(value)
+    prefix = value.split("/", 1)[1]
+    try:
+        network = ipaddress.ip_network(value, strict=False)
+    except ValueError:
+        return Classification(value, None, REASON_INVALID_V4)
+    if not isinstance(network, ipaddress.IPv4Network) or prefix != str(network.prefixlen):
+        return Classification(value, None, REASON_INVALID_V4)
+    return Classification(value, str(network), None)
+
+
+def entry_protection_reason(
+    canonical: str,
+    ranges: tuple[ProtectedNetwork, ...],
+    *,
+    override: bool,
+) -> str | None:
+    """Reject a host or CIDR that overlaps protected space."""
+
+    if "/" not in canonical:
+        return protection_reason(canonical, ranges, override=override)
+    if override:
+        return None
+    network = ipaddress.ip_network(canonical, strict=False)
+    for blocked in _BUILTIN_V4:
+        if network.overlaps(blocked):
+            return REASON_BUILTIN_V4
+    for protected in ranges:
+        if network.overlaps(protected.network):
+            return REASON_CUSTOMER
+    return None
+
+
 def protection_reason(
     canonical: str,
     ranges: tuple[ProtectedNetwork, ...],

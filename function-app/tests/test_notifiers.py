@@ -212,7 +212,13 @@ def test_engine_notifies_put_failure_and_keeps_the_status() -> None:
 def test_engine_notifies_capacity() -> None:
     notifier = FakeNotifier()
     full = [f"198.51.{index // 256}.{index % 256}" for index in range(1, 601)]
-    document = agw_policy(agw_block_rule(full))
+    rules = []
+    for priority in range(1, 101):
+        if priority == 10:
+            rules.append(agw_block_rule(full))
+        else:
+            rules.append({"name": f"Occupied{priority}", "priority": priority, "matchConditions": []})
+    document = agw_policy(*rules)
     app = Engine(FakeWaf(document), None, notifier)
     result = app.execute(incident("203.0.113.5"), config(auto_block_enabled=True))
     assert result.status == "capacity-exceeded"

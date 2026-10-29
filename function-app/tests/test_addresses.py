@@ -3,7 +3,9 @@ from sentinel_waf_block.addresses import (
     REASON_CUSTOMER,
     REASON_DIRTY,
     REASON_INVALID_V4,
+    canonical_block_entry,
     canonical_host,
+    entry_protection_reason,
     parse_protected_ranges,
     protection_reason,
 )
@@ -89,6 +91,16 @@ def test_customer_ranges_use_membership_and_reject_other_prefixes() -> None:
         "192.0.2.0/08",
         "::ffff:192.0.2.1",
     )
+
+
+def test_block_entry_stores_a_host_or_network_cidr() -> None:
+    assert canonical_block_entry("203.0.113.5").canonical == "203.0.113.5"
+    assert canonical_block_entry("203.0.113.5/24").canonical == "203.0.113.0/24"
+    assert canonical_block_entry("203.0.113.0/08").reason == REASON_INVALID_V4
+    assert canonical_block_entry("203.0.113.5,198.51.100.8").reason == REASON_DIRTY
+    ranges, _bad = parse_protected_ranges([])
+    assert entry_protection_reason("10.1.2.0/24", ranges, override=False) == REASON_BUILTIN_V4
+    assert entry_protection_reason("203.0.113.0/24", ranges, override=False) is None
 
 
 def test_override_skips_membership_only() -> None:

@@ -19,6 +19,7 @@ from sentinel_waf_block.models import (
     Incident,
     InputError,
     incident_from_payload,
+    manual_from_payload,
 )
 from sentinel_waf_block.notifiers import DEFAULT_EVENTS, FLOW_AUDIENCE, TeamsWorkflowNotifier
 
@@ -26,16 +27,19 @@ log = logging.getLogger("sentinel_waf_block.function")
 app = func.FunctionApp(http_auth_level=func.AuthLevel.FUNCTION)
 
 
-def _effective_config(incident: Incident, config: Config) -> Config:
-    # The execution field is authoritative and fail-closed: even a deployment
-    # with AUTO_BLOCK_ENABLED=true cannot block on the evaluation call. The
-    # playbook sends execution=enforce only after an approver chose Approve,
-    # so approval stays the only gate.
-    if incident.execution == "enforce":
+def _execution_override(execution: str, config: Config) -> Config:
+    # execution is authoritative and fail-closed. The playbook sends
+    # execution=enforce only after an approver chose Approve. The operations
+    # app sends it for a manual add or remove.
+    if execution == "enforce":
         return replace(config, auto_block_enabled=True)
-    if incident.execution == "dry-run":
+    if execution == "dry-run":
         return replace(config, auto_block_enabled=False)
     return config
+
+
+def _effective_config(incident: Incident, config: Config) -> Config:
+    return _execution_override(incident.execution, config)
 
 
 def _notifier_from_env() -> TeamsWorkflowNotifier | None:
@@ -61,8 +65,9 @@ def sentinel_waf_auto_block(req: func.HttpRequest) -> func.HttpResponse:
             400,
         )
     try:
-        incident = incident_from_payload(payload)
+        manual = manual_from_payload(payload)
         config = config_from_env()
+        incident = None if manual is not None else incident_from_payload(payload)
     except InputError as exc:
         return _response({"status": STATUS_VALIDATION, "changed": False, "reason": str(exc)}, 400)
     except ConfigError as exc:
@@ -71,9 +76,18 @@ def sentinel_waf_auto_block(req: func.HttpRequest) -> func.HttpResponse:
             500,
         )
     try:
-        result = Engine(ArmWafClient(), SentinelCommentClient(), _notifier_from_env()).execute(
-            incident, _effective_config(incident, config)
-        )
+        engine = Engine(ArmWafClient(), SentinelCommentClient(), _notifier_from_env())
+        if manual is not None:
+            operation, address, execution = manual
+            shown = _execution_override(execution, config)
+            result = (
+                engine.add_entry(address, shown)
+                if operation == "add"
+                else engine.remove_entry(address, shown)
+            )
+        else:
+            assert incident is not None
+            result = engine.execute(incident, _effective_config(incident, config))
     except Exception:
         log.warning("unhandled failure during execution")
         return _response({"status": STATUS_INTERNAL, "changed": False, "reason": "internal error"}, 500)

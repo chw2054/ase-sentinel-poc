@@ -9,13 +9,15 @@ from typing import Any
 APPLICATION_GATEWAY = "ApplicationGateway"
 FRONT_DOOR = "FrontDoor"
 PROVIDERS = frozenset({APPLICATION_GATEWAY, FRONT_DOOR})
-# One IPMatch condition holds 600 values. Another policy with this tag extends the list.
+# One IPMatch condition holds 600 values. Another custom rule on the same policy extends the list.
 MATCH_VALUES_PER_POLICY = 600
 BLOCK_POLICY_TAG = "ase-sentinel-block-list"
 
 STATUS_DRY_RUN = "dry-run"
 STATUS_BLOCKED = "blocked"
 STATUS_ALREADY_BLOCKED = "already-blocked"
+STATUS_REMOVED = "removed"
+STATUS_NOT_LISTED = "not-listed"
 STATUS_NOTHING = "nothing-to-block"
 STATUS_CAPACITY = "capacity-exceeded"
 STATUS_RANGES = "protected-ranges-invalid"
@@ -78,6 +80,8 @@ class Result:
     comment_error: str = ""
     notify_error: str = ""
     policy_resource_id: str = ""
+    written_rule: str = ""
+    written_priority: int = 0
 
     def to_dict(self) -> dict[str, Any]:
         body: dict[str, Any] = {
@@ -96,6 +100,8 @@ class Result:
             "comment_error": self.comment_error,
             "notify_error": self.notify_error,
             "policy_resource_id": self.policy_resource_id,
+            "written_rule": self.written_rule,
+            "written_priority": self.written_priority,
         }
         return body
 
@@ -140,3 +146,24 @@ def incident_from_payload(payload: object) -> Incident:
         ip_entities=tuple(entities),
         execution=execution,
     )
+
+
+def manual_from_payload(payload: object) -> tuple[str, str, str] | None:
+    """Return add/remove fields, or None when the body is an incident call.
+
+    The playbook omits operation. A manual edit from the operations app sends
+    operation add or remove and one address.
+    """
+
+    if not isinstance(payload, dict) or "operation" not in payload:
+        return None
+    operation = payload["operation"]
+    if operation not in {"add", "remove"}:
+        raise InputError("operation must be add or remove")
+    address = payload.get("address")
+    if not isinstance(address, str):
+        raise InputError("address must be a string")
+    execution = payload.get("execution", "")
+    if execution not in ("", "dry-run", "enforce"):
+        raise InputError('execution must be "dry-run" or "enforce"')
+    return operation, address, execution

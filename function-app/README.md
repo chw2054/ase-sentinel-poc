@@ -54,7 +54,7 @@ The deployed app setting `AUTO_BLOCK_ENABLED` defaults to the JSON boolean `true
 
 Dry-run still validates, reads the policy when an enforceable address exists, and comments `Would block IP: <address>` for each new address. It does not change the policy.
 
-Enforcement rebuilds custom rule `SentinelAutoBlock` and comments `Blocked IP: <address>`. A failed or unfinished PUT is `waf-put-failed`. The comment says `Do not assume` the address was blocked. A comment failure after a successful PUT is `blocked-comment-failed` with `changed: true`, and the PUT is not repeated.
+Enforcement writes the address to one block list custom rule and comments `Blocked IP: <address>`. The first rule is `SentinelAutoBlock`. A later rule is named `SentinelAutoBlock-2`, then `-3`, and so on. A failed or unfinished PUT is `waf-put-failed`. The comment says `Do not assume` the address was blocked. A comment failure after a successful PUT is `blocked-comment-failed` with `changed: true`, and the PUT is not repeated.
 
 There is no automatic expiry. Rollback is an operator action. The workload never deletes a block entry.
 
@@ -70,14 +70,15 @@ Environment variables are the alternative. `AUTO_BLOCK_ENABLED`, `OVERRIDE_PROTE
 | `wafProvider` | `ApplicationGateway` or `FrontDoor` |
 | `protectedIpRanges` | `[]` |
 | `maximumBlockEntries` | `100`, still parsed, no longer the block-list ceiling |
-| `BLOCK_POLICY_TAG` | `ase-sentinel-block-list` |
 | `autoBlockEnabled` | `true` in `config.example.json` and in the deployed app. A missing setting stays `false` |
 | `overrideProtectedRanges` | `false` |
 | `blockRuleName` | `SentinelAutoBlock` |
 | `blockRulePriority` | `10` |
 | `armApiVersion` | `2024-05-01` for Application Gateway, `2024-02-01` for Front Door |
 
-Each IPMatch condition holds 600 addresses. `maximumBlockEntries` is no longer that ceiling. A WAF policy tagged `ase-sentinel-block-list=true` is another block list. One block writes the same address to every tagged policy that is still below 600. A policy that already holds 600 is left unchanged. A gateway blocks the address only when the policy attached to that gateway received it.
+A manual edit sends `operation` `add` or `remove`, one `address`, and `execution`. `add` accepts one IPv4 host or CIDR and writes the canonical value onto one block list rule. `remove` deletes that stored value. A rule left with no values is omitted, because an empty IPMatch list is invalid. The playbook omits `operation` and is unchanged.
+
+Each IPMatch condition holds 600 addresses. `maximumBlockEntries` is no longer that ceiling. Block lists are custom rules on the configured WAF policy whose names are `blockRuleName` or `blockRuleName-<number>`. The Application Gateway bound to that policy evaluates every custom rule, so an address on any of those rules is blocked. One block writes the address to a single rule that is still below 600. A full rule is skipped. When every rule is full, the function creates the next rule on the same policy, using the next free priority from 1 to 100. A policy with no free priority is not changed.
 
 ## Local testing
 
@@ -112,13 +113,13 @@ Incident values are single hosts. Empty text, whitespace, commas, slashes, zone 
 
 ## Opaque match values and PUT bodies
 
-Values already stored on the named rule are copied in order as exact strings. They are not parsed or rewritten. A stored string still counts toward the 600 addresses on that policy. The workload does not delete that stored value to make the PUT succeed. The failure, if the provider rejects it, is reported.
+Values already stored on a block list rule are copied in order as exact strings. They are not parsed or rewritten. A stored string still counts toward the 600 addresses on that rule. The workload does not delete that stored value to make the PUT succeed. The failure, if the provider rejects it, is reported.
 
 Application Gateway PUT sends `location`, `tags`, `properties.policySettings`, `properties.customRules`, and `properties.managedRules`. It does not send `sku`, `id`, `etag`, or read-only links. The match condition uses the ARM spelling `negationConditon`. API `2024-05-01` rejects `negationCondition`.
 
 Front Door PUT also sends `sku` and writes `properties.customRules.rules`. Its match condition uses `negateCondition` and `matchValue`.
 
-The named rule is rebuilt and placed first. Every other custom rule object is copied through. If `policySettings` or `managedRules` is missing, the workload does not PUT.
+Block list rules are rebuilt and placed first. The rule that received the address is the only one whose match values change. Every other custom rule object, including `PocSimulatedProbe`, is copied through. If `policySettings` or `managedRules` is missing, the workload does not PUT.
 
 ## `overrideProtectedRanges`
 

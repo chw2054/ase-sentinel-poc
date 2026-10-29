@@ -6,7 +6,7 @@ import httpx
 from fastapi.testclient import TestClient
 
 from app.config import Settings
-from app.live import SentinelAzure
+from app.live import SentinelAzure, _on_block_list
 from app.main import create_app
 
 INCIDENT_ID = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
@@ -16,10 +16,13 @@ ARM_ID = (
 )
 POLICY_ID = (
     "/subscriptions/sub/resourceGroups/rg/providers/Microsoft.Network/"
-    "applicationGatewayWebApplicationFirewallPolicies/wafpol"
+    "applicationGatewayWebApplicationFirewallPolicies/wafpol-ase-sentinel-poc"
 )
 SECOND_POLICY_ID = POLICY_ID + "-2"
-OTHER_POLICY_ID = POLICY_ID + "-other"
+OTHER_POLICY_ID = (
+    "/subscriptions/sub/resourceGroups/rg/providers/Microsoft.Network/"
+    "applicationGatewayWebApplicationFirewallPolicies/wafpol-other"
+)
 WORKSPACE = "log-ase-sentinel-poc-7ttpll74bmhiq"
 SENTINEL_ID = (
     "/subscriptions/sub/resourceGroups/rg/providers/Microsoft.OperationalInsights/"
@@ -88,7 +91,15 @@ def transport(calls: list[httpx.Request]) -> httpx.MockTransport:
                                     {
                                         "name": "SentinelAutoBlock",
                                         "matchConditions": [{"matchValues": ["198.51.100.4"]}],
-                                    }
+                                    },
+                                    {
+                                        "name": "PocSimulatedProbe",
+                                        "matchConditions": [{"matchValues": ["ase-poc-probe"]}],
+                                    },
+                                    {
+                                        "name": "SentinelAutoBlock-2",
+                                        "matchConditions": [{"matchValues": ["198.51.100.8"]}],
+                                    },
                                 ]
                             },
                         },
@@ -172,6 +183,29 @@ def transport(calls: list[httpx.Request]) -> httpx.MockTransport:
         if request.method == "PUT" and url.endswith(f"/{INCIDENT_ID}?api-version=2024-03-01"):
             return httpx.Response(200, json={"name": INCIDENT_ID})
         if request.method == "POST" and url.startswith("https://fn.example/"):
+            posted = json.loads(request.content)
+            if posted.get("operation") == "remove":
+                return httpx.Response(
+                    200,
+                    json={
+                        "status": "removed",
+                        "changed": True,
+                        "written_rule": "SentinelAutoBlock",
+                        "new_addresses": [posted.get("address")],
+                        "notify_error": "",
+                    },
+                )
+            if posted.get("operation") == "add":
+                return httpx.Response(
+                    200,
+                    json={
+                        "status": "blocked",
+                        "changed": True,
+                        "written_rule": "SentinelAutoBlock-2",
+                        "new_addresses": ["203.0.113.0/24"],
+                        "notify_error": "",
+                    },
+                )
             return httpx.Response(200, json={"status": "blocked", "changed": True, "notify_error": ""})
         return httpx.Response(500, json={"error": {"message": "unexpected " + url}})
 
@@ -204,19 +238,27 @@ def test_home_lists_the_sentinel_incident_and_skips_sql() -> None:
     assert f"Sentinel <strong>{WORKSPACE}</strong>" in page.text
     assert SENTINEL_ID in page.text
     assert ">wafpol-ase-sentinel-poc</strong>" in page.text
-    assert ">wafpol-ase-sentinel-poc-2</strong>" in page.text
+    assert "wafpol-ase-sentinel-poc-2" not in page.text
     assert "wafpol-other" not in page.text
+    assert ">SentinelAutoBlock</strong>" in page.text
+    assert ">SentinelAutoBlock-2</strong>" in page.text
+    assert "PocSimulatedProbe" not in page.text
     assert "http://20.169.234.86" in page.text
-    assert "http://20.240.1.2" in page.text
+    assert "http://20.240.1.2" not in page.text
     assert ">agw-ase-sentinel-poc</strong>" in page.text
-    assert ">agw-ase-sentinel-poc-2</strong>" in page.text
+    assert "agw-ase-sentinel-poc-2" not in page.text
     assert "1 / 600" in page.text
     blocks = api.get("/blocks")
     assert blocks.status_code == 200
     assert "198.51.100.4" in blocks.text
     assert "198.51.100.8" in blocks.text
+    assert "SentinelAutoBlock-2" in blocks.text
     assert "203.0.113.50" not in blocks.text
+    assert "ase-poc-probe" not in blocks.text
     assert "http://20.169.234.86" in blocks.text
+    assert 'name="address"' in blocks.text
+    assert "Remove" in blocks.text
+    assert 'value="198.51.100.4"' in blocks.text
     detail = api.get(f"/incidents/{INCIDENT_ID}")
     assert detail.status_code == 200
     assert WORKSPACE in detail.text
@@ -241,6 +283,40 @@ def test_block_posts_execution_enforce_and_does_not_close() -> None:
     assert body["incidentArmId"] == ARM_ID
     assert function_calls[0].headers["x-functions-key"] == "test-key"
     assert not any(call.method == "PUT" and "/comments/" in str(call.url) for call in calls)
+
+
+def test_cidr_entry_covers_an_incident_host() -> None:
+    assert _on_block_list(("203.0.113.9",), {"203.0.113.0/24"})
+    assert not _on_block_list(("198.51.100.4",), {"203.0.113.0/24"})
+
+
+def test_block_page_adds_and_removes_an_ip_or_cidr_through_the_function() -> None:
+    calls: list[httpx.Request] = []
+    api = client(calls)
+    sign_in(api)
+    added = api.post("/blocks", data={"address": "203.0.113.5/24"}, follow_redirects=False)
+    assert added.status_code == 303
+    assert "Added%20203.0.113.0/24" in added.headers["location"]
+    removed = api.post("/blocks/remove", data={"address": "198.51.100.4"}, follow_redirects=False)
+    assert removed.status_code == 303
+    assert "Removed%20198.51.100.4" in removed.headers["location"]
+    function_calls = [call for call in calls if str(call.url).startswith("https://fn.example/")]
+    assert len(function_calls) == 2
+    bodies = [json.loads(call.content) for call in function_calls]
+    assert bodies[0] == {"operation": "add", "address": "203.0.113.5/24", "execution": "enforce"}
+    assert bodies[1] == {"operation": "remove", "address": "198.51.100.4", "execution": "enforce"}
+    assert all(call.headers["x-functions-key"] == "test-key" for call in function_calls)
+    assert not any(call.method == "PUT" for call in calls)
+
+
+def test_viewer_cannot_edit_the_block_list() -> None:
+    calls: list[httpx.Request] = []
+    api = client(calls)
+    sign_in(api, "viewer@localhost")
+    response = api.post("/blocks/remove", data={"address": "198.51.100.4"}, follow_redirects=False)
+    assert response.status_code == 303
+    assert "does%20not%20allow" in response.headers["location"]
+    assert not any(str(call.url).startswith("https://fn.example/") for call in calls)
 
 
 def test_dismiss_closes_without_calling_the_function() -> None:

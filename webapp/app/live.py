@@ -42,12 +42,28 @@ class GatewayView:
 
 
 @dataclass(frozen=True)
+class RuleView:
+    name: str
+    values: tuple[str, ...]
+
+
+@dataclass(frozen=True)
 class PolicyView:
     name: str
     resource_id: str
-    tagged: bool
-    values: tuple[str, ...]
+    rules: tuple[RuleView, ...]
     gateways: tuple[GatewayView, ...]
+
+    @property
+    def values(self) -> tuple[str, ...]:
+        found: list[str] = []
+        seen: set[str] = set()
+        for rule in self.rules:
+            for value in rule.values:
+                if value not in seen:
+                    seen.add(value)
+                    found.append(value)
+        return tuple(found)
 
 
 @dataclass(frozen=True)
@@ -149,58 +165,33 @@ class SentinelAzure:
             + "/providers/Microsoft.OperationalInsights/workspaces/"
             + settings.workspace_name
         )
-        documents = self._policy_documents()
-        chosen = []
-        seen: set[str] = set()
-        for document in documents:
-            resource_id = str(document.get("id") or settings.waf_policy_id)
-            key = resource_id.casefold()
-            if key in seen:
-                continue
-            tagged = _has_tag(document.get("tags"), settings.block_policy_tag)
-            configured = key == settings.waf_policy_id.casefold()
-            if not tagged and not configured:
-                continue
-            seen.add(key)
-            chosen.append(
-                PolicyView(
-                    name=str(document.get("name") or resource_id.rsplit("/", 1)[-1]),
-                    resource_id=resource_id,
-                    tagged=tagged,
-                    values=_match_values(document, settings.block_rule_name),
-                    gateways=(),
-                )
-            )
-        if settings.waf_policy_id.casefold() not in seen:
-            chosen.insert(
-                0,
-                PolicyView(
-                    name=settings.waf_policy_id.rsplit("/", 1)[-1],
-                    resource_id=settings.waf_policy_id,
-                    tagged=False,
-                    values=_match_values(self._policy(settings.waf_policy_id), settings.block_rule_name),
-                    gateways=(),
-                ),
-            )
+        document = None
+        for item in self._policy_documents():
+            if str(item.get("id") or "").casefold() == settings.waf_policy_id.casefold():
+                document = item
+                break
+        if document is None:
+            document = self._policy(settings.waf_policy_id)
+        resource_id = str(document.get("id") or settings.waf_policy_id)
+        policy = PolicyView(
+            name=str(document.get("name") or resource_id.rsplit("/", 1)[-1]),
+            resource_id=resource_id,
+            rules=_block_rules(document, settings.block_rule_name),
+            gateways=(),
+        )
         gateway_error = ""
         try:
             gateways = self._gateways()
         except AzureCallError as exc:
             gateways = []
             gateway_error = str(exc)
-        attached = []
-        for policy in chosen:
-            matched = tuple(gateway for gateway in gateways if gateway[0].casefold() == policy.resource_id.casefold())
-            attached.append(
-                PolicyView(
-                    policy.name,
-                    policy.resource_id,
-                    policy.tagged,
-                    policy.values,
-                    tuple(GatewayView(name, url) for _policy_id, name, url in matched),
-                )
-            )
-        return Inventory(settings.workspace_name, sentinel_id, tuple(attached), gateway_error)
+        matched = tuple(
+            GatewayView(name, url)
+            for policy_id, name, url in gateways
+            if policy_id.casefold() == policy.resource_id.casefold()
+        )
+        attached = PolicyView(policy.name, policy.resource_id, policy.rules, matched)
+        return Inventory(settings.workspace_name, sentinel_id, (attached,), gateway_error)
 
     def block_values(self) -> tuple[str, ...]:
         return tuple(sorted(self.inventory().addresses))
@@ -293,6 +284,25 @@ class SentinelAzure:
                 "ipEntities": list(incident.ips),
                 "execution": "enforce",
             },
+        )
+        if response.status_code >= 400:
+            raise AzureCallError(_public_error(response))
+        try:
+            body = response.json()
+        except ValueError as exc:
+            raise AzureCallError("the block function did not return JSON") from exc
+        if not isinstance(body, dict):
+            raise AzureCallError("the block function did not return JSON")
+        return body
+
+    def change_block(self, address: str, operation: str) -> dict:
+        response = self.http.post(
+            self.settings.function_url,
+            headers={
+                "Content-Type": "application/json",
+                "x-functions-key": self.settings.function_key,
+            },
+            json={"operation": operation, "address": address, "execution": "enforce"},
         )
         if response.status_code >= 400:
             raise AzureCallError(_public_error(response))
@@ -461,7 +471,7 @@ def _routes():
             request,
             "live_incident.html",
             incident=incident,
-            on_block_list=bool(incident.ips) and set(incident.ips) <= inventory.addresses,
+            on_block_list=_on_block_list(incident.ips, inventory.addresses),
             can_decide=actor is not None and bool(actor.roles & DECISION_ROLES),
             inventory=inventory,
             load_error="",
@@ -512,7 +522,44 @@ def _routes():
             return _render(request, "live_blocks.html", inventory=None, load_error=str(exc))
         return _render(request, "live_blocks.html", inventory=inventory, load_error="")
 
+    @ui.post("/blocks")
+    def add_block(request: Request, address: str = Form(...)):
+        return _edit_block(request, address, "add")
+
+    @ui.post("/blocks/remove")
+    def remove_block(request: Request, address: str = Form(...)):
+        return _edit_block(request, address, "remove")
+
     return ui
+
+
+def _edit_block(request: Request, address: str, operation: str):
+    actor = _decision_actor(request)
+    if isinstance(actor, RedirectResponse):
+        return actor
+    try:
+        result = request.app.state.azure.change_block(address, operation)
+    except AzureCallError as exc:
+        return RedirectResponse("/blocks?error=" + quote(str(exc)), status_code=303)
+    status = str(result.get("status") or "")
+    stored = result.get("new_addresses") or result.get("candidate_addresses") or [address]
+    shown = stored[0] if isinstance(stored, list) and stored else address
+    if operation == "add" and status == "blocked":
+        rule = str(result.get("written_rule") or "the block list")
+        message = f"Added {shown} to {rule}."
+    elif operation == "add" and status == "already-blocked":
+        message = f"{shown} is already on the block list."
+    elif operation == "remove" and status == "removed":
+        rule = str(result.get("written_rule") or "the block list")
+        message = f"Removed {shown} from {rule}."
+    elif operation == "remove" and status == "not-listed":
+        message = f"{shown} is not on a block list."
+    else:
+        reason = str(result.get("reason") or status or "the function did not change the block list")
+        return RedirectResponse("/blocks?error=" + quote(reason[:300]), status_code=303)
+    if result.get("notify_error"):
+        message += " The Teams notification was not delivered."
+    return RedirectResponse("/blocks?message=" + quote(message), status_code=303)
 
 
 def _decision_actor(request: Request):
@@ -549,8 +596,33 @@ def _row(incident: LiveIncident, blocked: set[str]) -> dict:
         "status": incident.status,
         "created": incident.created,
         "ip": ", ".join(incident.ips),
-        "on_block_list": bool(incident.ips) and set(incident.ips) <= blocked,
+        "on_block_list": _on_block_list(incident.ips, blocked),
     }
+
+
+def _on_block_list(ips: tuple[str, ...], entries: set[str]) -> bool:
+    if not ips:
+        return False
+    return all(_entry_covers(entries, ip) for ip in ips)
+
+
+def _entry_covers(entries: set[str], host: str) -> bool:
+    if host in entries:
+        return True
+    try:
+        address = ipaddress.ip_address(host)
+    except ValueError:
+        return False
+    for entry in entries:
+        if "/" not in entry:
+            continue
+        try:
+            network = ipaddress.ip_network(entry, strict=False)
+        except ValueError:
+            continue
+        if address in network:
+            return True
+    return False
 
 
 def _incident(item: dict) -> LiveIncident:
@@ -583,27 +655,37 @@ def _with_ips(incident: LiveIncident, ips: tuple[str, ...]) -> LiveIncident:
     )
 
 
-def _has_tag(tags: object, key: str) -> bool:
-    if not isinstance(tags, dict) or not key:
-        return False
-    return any(str(name).casefold() == key.casefold() and str(value).lower() in {"true", "1", "yes"} for name, value in tags.items())
+def _is_block_list_name(name: object, base: str) -> bool:
+    return isinstance(name, str) and base != "" and (name == base or name.startswith(base + "-"))
 
 
-def _match_values(document: dict, rule_name: str) -> tuple[str, ...]:
+def _block_rules(document: dict, rule_name: str) -> tuple[RuleView, ...]:
     rules = (document.get("properties") or {}).get("customRules")
     if not isinstance(rules, list):
         return ()
+    found: list[RuleView] = []
     for rule in rules:
-        if not isinstance(rule, dict) or rule.get("name") != rule_name:
+        if not isinstance(rule, dict) or not _is_block_list_name(rule.get("name"), rule_name):
             continue
         conditions = rule.get("matchConditions") or []
-        if not conditions or not isinstance(conditions[0], dict):
-            return ()
-        values = conditions[0].get("matchValues") or []
-        if not isinstance(values, list):
-            raise AzureCallError("matchValues is not an array")
-        return tuple(item for item in values if isinstance(item, str))
-    return ()
+        values: list[str] = []
+        if conditions and isinstance(conditions[0], dict):
+            raw = conditions[0].get("matchValues") or []
+            if not isinstance(raw, list):
+                raise AzureCallError("matchValues is not an array")
+            values = [item for item in raw if isinstance(item, str)]
+        found.append(RuleView(str(rule.get("name")), tuple(values)))
+    found.sort(key=lambda item: _rule_sort_key(item.name, rule_name))
+    return tuple(found)
+
+
+def _rule_sort_key(name: str, base: str) -> tuple[int, int, str]:
+    if name == base:
+        return (0, 0, name)
+    suffix = name[len(base) + 1 :]
+    if suffix.isdigit():
+        return (1, int(suffix), name)
+    return (2, 0, name)
 
 
 def _host(value: object) -> str:

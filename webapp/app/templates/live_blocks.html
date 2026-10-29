@@ -2,20 +2,34 @@
 {% block body %}
 <h1>Block list</h1>
 {% include "live_context.html" %}
-<p class="banner">The same address is stored on every WAF policy that is still below {{ per_policy }}. A full policy is skipped. A gateway blocks an address when the policy attached to that gateway contains it. Removing an address is a separate policy edit.</p>
+<p class="banner">Each address is stored on one block list custom rule that is still below {{ per_policy }}. A full rule is skipped. When every rule is full, a new rule is created on the same WAF policy. Any of those rules blocks traffic on the Application Gateway. Remove an IP or CIDR here when it was a false positive or added by mistake.</p>
+<form method="post" action="/blocks" class="panel" onsubmit="return confirm('Add this IP or CIDR to the block list?');">
+  <label>IP or CIDR<br><input name="address" required placeholder="203.0.113.5 or 203.0.113.0/24"></label>
+  <button>Add</button>
+</form>
 {% if load_error %}<p class="error">{{ load_error }}</p>{% endif %}
 <table>
-  <tr><th>Address</th><th>WAF policy</th><th>Application Gateway</th></tr>
+  <tr><th>Address</th><th>Block list</th><th>Application Gateway</th><th></th></tr>
   {% if inventory %}
   {% for policy in inventory.policies %}
-    {% for value in policy.values %}
-    <tr>
-      <td>{{ value }}</td>
-      <td>{{ policy.name }}</td>
-      <td>{% for gateway in policy.gateways %}<a href="{{ gateway.url }}">{{ gateway.url }}</a>{% else %}None{% endfor %}</td>
-    </tr>
+    {% for rule in policy.rules %}
+      {% for value in rule.values %}
+      <tr>
+        <td>{{ value }}</td>
+        <td>{{ rule.name }}</td>
+        <td>{% for gateway in policy.gateways %}<a href="{{ gateway.url }}">{{ gateway.url }}</a>{% else %}None{% endfor %}</td>
+        <td>
+          <form method="post" action="/blocks/remove" onsubmit="return confirm('Remove this address from the block list?');">
+            <input type="hidden" name="address" value="{{ value }}">
+            <button>Remove</button>
+          </form>
+        </td>
+      </tr>
+      {% else %}
+      <tr><td colspan="4">{{ rule.name }} has no addresses.</td></tr>
+      {% endfor %}
     {% else %}
-    <tr><td colspan="3">{{ policy.name }} has no SentinelAutoBlock values.</td></tr>
+    <tr><td colspan="4">{{ policy.name }} has no block list custom rule.</td></tr>
     {% endfor %}
   {% endfor %}
   {% endif %}

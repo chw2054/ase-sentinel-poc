@@ -3,9 +3,12 @@
   <p>Sentinel <strong>{{ inventory.sentinel_name }}</strong></p>
   <p>{{ inventory.sentinel_id }}</p>
   {% for policy in inventory.policies %}
-  <p>WAF <strong>{{ policy.name }}</strong> — {{ policy.values | length }} / {{ per_policy }}
-    {% if policy.tagged %}tagged {{ policy.resource_id }}{% else %}configured policy, tag not set{% endif %}
-  </p>
+  <p>WAF <strong>{{ policy.name }}</strong> {{ policy.resource_id }}</p>
+  {% for rule in policy.rules %}
+  <p>Block list <strong>{{ rule.name }}</strong> — {{ rule.values | length }} / {{ per_policy }}</p>
+  {% else %}
+  <p>No block list custom rule yet.</p>
+  {% endfor %}
   {% for gateway in policy.gateways %}
   <p>Application Gateway <strong>{{ gateway.name }}</strong> <a href="{{ gateway.url }}">{{ gateway.url }}</a></p>
   {% else %}
