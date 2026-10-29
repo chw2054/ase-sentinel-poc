@@ -3,6 +3,11 @@
 .last-deployment.json
 .azcli
 function-app/.venv/
+webapp/.venv/
+webapp/**/__pycache__/
+webapp/.pytest_cache/
+webapp/webapp-data.db
+webapp-data.db
 function-app/**/__pycache__/
 function-app/.pytest_cache/
 function-app/*.egg-info/
