@@ -97,7 +97,7 @@ App settings carry the configuration. Boolean and numeric settings are JSON toke
 
 ## Teams notification
 
-`NOTIFY_TEAMS_URL` is the optional Teams Workflows endpoint ("When a Teams webhook request is received"). When it is set, the function posts an Adaptive Card after the decision. `NOTIFY_EVENTS` is a comma-separated filter. An empty setting uses `would_block,blocked,put_failed,capacity`. A dry-run emits `would_block` and is posted only when that event is listed. A notification failure never changes the decision result: the HTTP response keeps its status, and the incident comment records `The Teams notification was not delivered` with the failure reason. The URL is a secret; errors and logs carry only a status, never the URL. Store it as a Key Vault reference in the app setting.
+`NOTIFY_TEAMS_URL` is the optional Teams Workflows endpoint ("When a Teams webhook request is received"). When it is set, the function posts an Adaptive Card after the decision. `NOTIFY_EVENTS` is a comma-separated filter that defaults to `blocked,put_failed,capacity`. A dry-run does not notify. A notification failure never changes the decision result: the HTTP response keeps its status, and the incident comment records `The Teams notification was not delivered` with the failure reason. The URL is a secret; errors and logs carry only a status, never the URL. Store it as a Key Vault reference in the app setting.
 
 ## Prefix allow-list
 
