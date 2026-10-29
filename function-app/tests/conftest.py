@@ -139,3 +139,14 @@ class FakeComments:
         if self.error:
             raise self.error
         self.messages.append((incident_arm_id, message))
+
+
+class FakeNotifier:
+    def __init__(self, error: Exception | None = None) -> None:
+        self.error = error
+        self.calls: list[tuple[str, object]] = []
+
+    def notify(self, event: str, result: object) -> None:
+        self.calls.append((event, result))
+        if self.error:
+            raise self.error

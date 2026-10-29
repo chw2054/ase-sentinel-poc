@@ -17,7 +17,6 @@ from sentinel_waf_block.decision import (
     exceeds_capacity,
     merge_addresses,
     override_enabled,
-    split_provider,
 )
 from sentinel_waf_block.models import (
     PROVIDERS,
@@ -32,7 +31,6 @@ from sentinel_waf_block.models import (
     STATUS_PUT,
     STATUS_RANGES,
     STATUS_SHAPE,
-    STATUS_UNENFORCED,
     STATUS_VALIDATION,
     Config,
     Incident,
@@ -60,6 +58,14 @@ class CommentClient(Protocol):
     def write_comment(self, incident_arm_id: str, message: str) -> None: ...
 
 
+class Notifier(Protocol):
+    def notify(self, event: str, result: Result) -> None: ...
+
+
+class NotifyError(Exception):
+    """Notification delivery failed. The message must not carry the URL."""
+
+
 class AuthenticationError(Exception):
     """Credential acquisition failed. The message must not carry a token."""
 
@@ -77,16 +83,23 @@ class CommentError(Exception):
 
 
 class Engine:
-    def __init__(self, waf: WafClient, comments: CommentClient | None = None) -> None:
+    def __init__(
+        self,
+        waf: WafClient,
+        comments: CommentClient | None = None,
+        notifier: Notifier | None = None,
+    ) -> None:
         self._waf = waf
         self._comments = comments
+        self._notifier = notifier
 
     def execute(self, incident: Incident, config: Config) -> Result:
         result = self._decide(incident, config)
         result = replace(result, comment=render(result, incident, config))
         result = self._deliver_comment(incident, result)
+        result = self._deliver_notify(incident, config, result)
         log.info(
-            "status=%s changed=%s incident=%s existing=%s resulting=%s new=%s rejected=%s unenforced=%s",
+            "status=%s changed=%s incident=%s existing=%s resulting=%s new=%s rejected=%s",
             result.status,
             result.changed,
             incident.number,
@@ -94,7 +107,6 @@ class Engine:
             result.resulting_count,
             len(result.new_addresses),
             len(result.rejected_addresses),
-            len(result.unenforced_addresses),
         )
         return result
 
@@ -118,17 +130,16 @@ class Engine:
                 invalid_protected_ranges=invalid_ranges,
             )
         rejected: list[Rejection] = []
-        accepted: list[tuple[str, int]] = []
+        enforceable: list[str] = []
         seen: set[str] = set()
         override = override_enabled(config.override_protected_ranges)
         for raw in incident.ip_entities:
             classified = canonical_host(raw)
-            if classified.reason is not None or classified.canonical is None or classified.version is None:
+            if classified.reason is not None or classified.canonical is None:
                 rejected.append(Rejection(raw, classified.reason or "invalid"))
                 continue
             reason = protection_reason(
                 classified.canonical,
-                classified.version,
                 _networks,
                 override=override,
             )
@@ -138,18 +149,8 @@ class Engine:
             if classified.canonical in seen:
                 continue
             seen.add(classified.canonical)
-            accepted.append((classified.canonical, classified.version))
-        enforceable, unenforced = split_provider(accepted, config.waf_provider)
+            enforceable.append(classified.canonical)
         rejections = tuple(rejected)
-        unenforced_values = tuple(unenforced)
-        if not enforceable and unenforced:
-            return _result(
-                STATUS_UNENFORCED,
-                candidate_addresses=tuple(enforceable),
-                rejected_addresses=rejections,
-                unenforced_addresses=unenforced_values,
-                reason="Azure Application Gateway does not support IPv6 as an IP block source",
-            )
         if not enforceable:
             return _result(
                 STATUS_NOTHING,
@@ -161,7 +162,6 @@ class Engine:
                 STATUS_GET,
                 candidate_addresses=tuple(enforceable),
                 rejected_addresses=rejections,
-                unenforced_addresses=unenforced_values,
                 reason="wafPolicyResourceId is missing",
             )
         try:
@@ -171,7 +171,6 @@ class Engine:
                 STATUS_GET,
                 candidate_addresses=tuple(enforceable),
                 rejected_addresses=rejections,
-                unenforced_addresses=unenforced_values,
                 reason="authentication failed",
             )
         except WafGetError as exc:
@@ -179,7 +178,6 @@ class Engine:
                 STATUS_GET,
                 candidate_addresses=tuple(enforceable),
                 rejected_addresses=rejections,
-                unenforced_addresses=unenforced_values,
                 reason=_safe_text(exc),
             )
         try:
@@ -189,7 +187,6 @@ class Engine:
                 STATUS_SHAPE,
                 candidate_addresses=tuple(enforceable),
                 rejected_addresses=rejections,
-                unenforced_addresses=unenforced_values,
                 reason=_safe_text(exc),
             )
         merged, new = merge_addresses(list(view.existing_values), enforceable)
@@ -200,7 +197,6 @@ class Engine:
                 STATUS_ALREADY_BLOCKED,
                 candidate_addresses=tuple(enforceable),
                 rejected_addresses=rejections,
-                unenforced_addresses=unenforced_values,
                 existing_count=existing_count,
                 resulting_count=resulting_count,
                 reason="address is already listed",
@@ -211,7 +207,6 @@ class Engine:
                 candidate_addresses=tuple(enforceable),
                 new_addresses=tuple(new),
                 rejected_addresses=rejections,
-                unenforced_addresses=unenforced_values,
                 existing_count=existing_count,
                 resulting_count=resulting_count,
                 reason=(
@@ -225,7 +220,6 @@ class Engine:
             candidate_addresses=tuple(enforceable),
             new_addresses=tuple(new),
             rejected_addresses=rejections,
-            unenforced_addresses=unenforced_values,
             existing_count=existing_count,
             resulting_count=resulting_count,
         )
@@ -256,6 +250,34 @@ class Engine:
                 return replace(result, status=STATUS_COMMENT, comment_error=message)
             return replace(result, comment_error=message)
         return result
+
+
+    def _deliver_notify(self, incident: Incident, config: Config, result: Result) -> Result:
+        if self._notifier is None:
+            return result
+        event = _NOTIFY_EVENTS.get(result.status)
+        if event is None:
+            return result
+        try:
+            self._notifier.notify(event, result)
+        except NotifyError as exc:
+            failed = replace(result, notify_error=_safe_text(exc))
+            # Re-render so the Sentinel comment records the undelivered notification.
+            return replace(failed, comment=render(failed, incident, config))
+        return result
+
+
+_NOTIFY_EVENTS = {
+    # blocked-comment-failed is still a completed PUT; the Teams card should
+    # say the block happened and mention the comment failure separately.
+    STATUS_BLOCKED: "blocked",
+    STATUS_COMMENT: "blocked",
+    STATUS_PUT: "put_failed",
+    STATUS_CAPACITY: "capacity",
+    # The evaluation phase of the approval flow also notifies: the channel
+    # sees the proposal, the approver still gates the actual block.
+    STATUS_DRY_RUN: "would_block",
+}
 
 
 def _result(status: str, **kwargs: object) -> Result:

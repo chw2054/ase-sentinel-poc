@@ -23,17 +23,16 @@ The analytics rule and the playbook both refuse, unless `overrideProtectedRanges
 - Loopback `127.0.0.0/8`
 - Link-local `169.254.0.0/16`, which includes the instance metadata address `169.254.169.254`
 - `100.64.0.0/10`
-- IPv6 unspecified `::/128`, loopback `::1/128`, link-local `fe80::/10`, and unique local `fc00::/7`
 
 The rule also applies watchlist `AseWafIpAllowlist`. The function applies `protectedIpRanges` from its app settings and does not read that watchlist. Built-in ranges are hard-coded in the KQL and in the function, so a watchlist edit cannot remove them.
 
-`overrideProtectedRanges` skips those filters in both places. The deploy script will not set it without `-ConfirmOverrideProtectedRanges`. Empty values, non-canonical addresses, and IPv4-mapped IPv6 are still rejected. Application Gateway still does not write IPv6 into `IPMatch`.
+`overrideProtectedRanges` skips those filters in both places. The deploy script will not set it without `-ConfirmOverrideProtectedRanges`. Empty values and non-canonical addresses are still rejected. They are not written into `IPMatch` or Front Door `matchValue`.
 
 Customer ranges the function cannot parse fail the run before any block decision, including the dry-run sentence. The deploy script rejects those ranges first. The function check remains so a later app-setting edit cannot silently ignore a prefix such as `/12`.
 
 ## Dry-run and opt-in
 
-The function sends a PUT only when `autoBlockEnabled` is the JSON boolean `true`. The string `"true"` stays a dry-run. Dry-run still GETs the policy so it can avoid saying "Would block" for an address that is already listed. GET does not modify the policy. An incident that contains only IPv6 on Application Gateway does not GET, because that provider cannot block an IPv6 source.
+The function sends a PUT only when `autoBlockEnabled` is the JSON boolean `true`. The string `"true"` stays a dry-run. Dry-run still GETs the policy so it can avoid saying "Would block" for an address that is already listed. GET does not modify the policy. An incident with no canonical IPv4 address does not GET. The function rejects those values and does not change the policy.
 
 Duplicates are removed with `union` before a write. A second incident for an address already on the rule does not PUT. If the merged list would exceed `maximumBlockEntries`, nothing is written.
 

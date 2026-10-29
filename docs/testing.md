@@ -27,19 +27,7 @@ The test is a repeatable GET. It does not depend on malicious traffic. Default `
 
 4. **KQL identifies the source.** The verification query projects `ClientIp`, `Action`, `RuleId` or the Front Door rule name, the request, and the timestamp. The deployed analytics query is the matching file under `sentinel/analytics-rules/` with its tokens replaced. Operator verification files are not edited by the deployment.
 
-   IPv6 classification, applied by those analytics queries before an incident exists:
-
-   | Logged value | Entity `ClientIp` | Result |
-   | --- | --- | --- |
-   | `2001:db8::1` | `2001:0db8:0000:0000:0000:0000:0000:0001` | Candidate, when it is outside the protected ranges |
-   | `::1` | expanded loopback | Dropped, IPv6 loopback |
-   | `fe80::1` | expanded link-local | Dropped, `fe80::/10` |
-   | `fd00::1` | expanded unique local | Dropped, `fc00::/7` |
-   | `::ffff:10.1.2.3` | `10.1.2.3` | Dropped, IPv4 RFC1918 |
-   | `::ffff:203.0.113.5` | `203.0.113.5` | Candidate, as that IPv4 address |
-   | `not:an:ip` | none | Dropped, `parse_ipv6()` is empty |
-
-   `scripts/test-ip-ranges.ps1` checks the deploy-time parser and the same built-in boundaries. It does not run KQL. The test gateway has no IPv6 frontend, so `scripts/test.ps1` cannot produce these rows.
+   `scripts/test-ip-ranges.ps1` checks the deploy-time parser. It does not run KQL.
 
 5. **Sentinel creates an alert and an incident.** Allow the rule period. With a 5 minute schedule this is usually 10 to 15 minutes after the log row exists. Incident title: `ASE POC simulated WAF probe from <ip>`. Severity Medium. The IP is an entity. Custom details include the action, rule, request, host, and the first and last timestamps.
 

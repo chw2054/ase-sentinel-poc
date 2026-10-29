@@ -17,18 +17,12 @@ from sentinel_waf_block.models import (
     STATUS_PUT,
     STATUS_RANGES,
     STATUS_SHAPE,
-    STATUS_UNENFORCED,
     STATUS_VALIDATION,
     Config,
     Incident,
     Result,
 )
 
-_IPV6_NOTE = (
-    "Azure Application Gateway does not support IPv6 as an IP block source. "
-    "IPv6 is written only when wafProvider is Front Door. "
-    "Application Gateway IPMatch does not enforce IPv6, so these addresses were not written."
-)
 _EXPIRY = "There is no automatic expiry. Rollback is an operator action."
 
 
@@ -68,11 +62,13 @@ def render(result: Result, incident: Incident, config: Config) -> str:
             for item in result.rejected_addresses
         )
         parts.append(f"<p>Rejected:<br>{rejected}</p>")
-    note = _unenforced_note(result)
-    if note:
-        parts.append(f"<p>{html.escape(note, quote=False)}</p>")
     if result.reason and result.status not in {STATUS_DRY_RUN, STATUS_BLOCKED, STATUS_COMMENT}:
         parts.append(f"<p>{html.escape(result.reason, quote=False)}</p>")
+    if result.notify_error:
+        parts.append(
+            "<p>The Teams notification was not delivered: "
+            f"{html.escape(result.notify_error, quote=False)}</p>"
+        )
     return "".join(parts)
 
 
@@ -108,11 +104,6 @@ def _headline(
         return (
             "<p><strong>ASE POC playbook made no change.</strong> "
             "No block candidate remained. The WAF policy was not read or changed.</p>"
-        )
-    if status == STATUS_UNENFORCED:
-        return (
-            "<p><strong>ASE POC playbook made no change.</strong> "
-            "No enforceable address remained. The WAF policy was not read or changed.</p>"
         )
     if status == STATUS_CAPACITY:
         return (
@@ -168,8 +159,3 @@ def _action_lines(result: Result) -> list[str]:
     return []
 
 
-def _unenforced_note(result: Result) -> str:
-    if not result.unenforced_addresses:
-        return ""
-    listed = ", ".join(result.unenforced_addresses)
-    return f"Identified IPv6: {listed}. {_IPV6_NOTE}"

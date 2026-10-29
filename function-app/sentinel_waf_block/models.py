@@ -14,7 +14,6 @@ STATUS_DRY_RUN = "dry-run"
 STATUS_BLOCKED = "blocked"
 STATUS_ALREADY_BLOCKED = "already-blocked"
 STATUS_NOTHING = "nothing-to-block"
-STATUS_UNENFORCED = "unenforced"
 STATUS_CAPACITY = "capacity-exceeded"
 STATUS_RANGES = "protected-ranges-invalid"
 STATUS_VALIDATION = "validation-failed"
@@ -34,6 +33,10 @@ class Incident:
     number: str
     title: str
     ip_entities: tuple[str, ...]
+    # "" lets the deployed setting decide; "dry-run" never PUTs; "enforce"
+    # PUTs on this request only, which is how the playbook acts on an
+    # approved Teams card. The engine still re-validates every address.
+    execution: str = ""
 
 
 @dataclass(frozen=True)
@@ -64,13 +67,13 @@ class Result:
     candidate_addresses: tuple[str, ...] = ()
     new_addresses: tuple[str, ...] = ()
     rejected_addresses: tuple[Rejection, ...] = ()
-    unenforced_addresses: tuple[str, ...] = ()
     existing_count: int | None = None
     resulting_count: int | None = None
     reason: str = ""
     invalid_protected_ranges: tuple[str, ...] = ()
     comment: str = ""
     comment_error: str = ""
+    notify_error: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         body: dict[str, Any] = {
@@ -81,13 +84,13 @@ class Result:
             "rejected_addresses": [
                 {"value": item.value, "reason": item.reason} for item in self.rejected_addresses
             ],
-            "unenforced_addresses": list(self.unenforced_addresses),
             "existing_count": self.existing_count,
             "resulting_count": self.resulting_count,
             "reason": self.reason,
             "invalid_protected_ranges": list(self.invalid_protected_ranges),
             "comment": self.comment,
             "comment_error": self.comment_error,
+            "notify_error": self.notify_error,
         }
         return body
 
@@ -122,9 +125,13 @@ def incident_from_payload(payload: object) -> Incident:
         raise InputError("incidentNumber must not contain surrounding whitespace")
     if not isinstance(entities, list) or any(not isinstance(item, str) for item in entities):
         raise InputError("ipEntities must be an array of strings")
+    execution = payload.get("execution", "")
+    if execution not in ("", "dry-run", "enforce"):
+        raise InputError("execution must be \"dry-run\" or \"enforce\"")
     return Incident(
         arm_id=arm_id,
         number=str(number),
         title=title,
         ip_entities=tuple(entities),
+        execution=execution,
     )

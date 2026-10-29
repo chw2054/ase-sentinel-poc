@@ -58,7 +58,7 @@ test.ps1
     v
 +-------------------------------------------+
 | Python Function, system-assigned MI       |
-| 1. validate IPv4 or expanded IPv6         |
+| 1. validate one dotted IPv4 address       |
 | 2. reject loopback, RFC1918, link-local,  |
 |    169.254.169.254, CGNAT, protectedIpRanges|
 | 3. read the WAF policy                    |
@@ -211,7 +211,7 @@ When the value is not the boolean `true`:
 - Otherwise the incident comment contains the exact text `Would block IP: <address>` (one line per new address, separated by `<br>`).
 - There is no PUT on that path. The WAF policy and any network configuration are unchanged.
 
-A customer range the function cannot evaluate (`/12`, `/10`, `/40`, a bad token, or any prefix outside the allow-list) stops the run before any "Would block" line. That failure is closed: an unparsed allow range must not be treated as public. Allowed customer prefixes are IPv4 `/8`, `/16`, `/24`, and `/32`, and IPv6 `/16`, `/32`, `/48`, `/64`, `/80`, `/96`, `/112`, and `/128`.
+A customer range the function cannot evaluate (`/12`, `/10`, `/40`, a value that contains `:`, a bad token, or any prefix outside the allow-list) stops the run before any "Would block" line. That failure is closed: an unparsed allow range must not be treated as public. Allowed customer entries are an IPv4 host or `/8`, `/16`, `/24`, and `/32`.
 
 ## How blocking and dry-run are selected
 
@@ -269,13 +269,10 @@ Built-in ranges that are never sent to the block list unless `overrideProtectedR
 | `127.0.0.0/8` | Loopback |
 | `169.254.0.0/16` and `169.254.169.254/32` | Link-local, including the Azure metadata address |
 | `100.64.0.0/10` | Shared address space / CGNAT |
-| `::/128`, `::1/128` | IPv6 unspecified and loopback |
-| `fe80::/10` | IPv6 link-local |
-| `fc00::/7` | IPv6 unique local |
 
-The analytics rule hard-codes those ranges and also loads watchlist `AseWafIpAllowlist`, which contains the same built-ins plus `protectedIpRanges`. Editing the watchlist cannot drop the built-ins. `overrideProtectedRanges` skips both filters in the KQL and the playbook. Invalid IPs are still rejected. The deploy script requires `-ConfirmOverrideProtectedRanges` before it will set that switch. Leave it false.
+The analytics rule hard-codes those ranges and also loads watchlist `AseWafIpAllowlist`, which contains the same built-ins plus `protectedIpRanges`. Editing the watchlist cannot drop the built-ins. `overrideProtectedRanges` skips both filters in the KQL and the function. Text that is not a canonical IPv4 address is still rejected. The deploy script requires `-ConfirmOverrideProtectedRanges` before it will set that switch. Leave it false.
 
-Customer `protectedIpRanges` accept a single IPv4 or `/8`, `/16`, `/24`, `/32`, and an IPv6 address or `/16`, `/32`, `/48`, `/64`, `/80`, `/96`, `/112`, `/128`. That is what the Logic App expression can compare without a regex. `deploy.ps1` expands IPv6 to eight lowercase hex groups. `/12` and `/10` stay hard-coded so they are not forced through that matcher. `fe80::/10` and `fc00::/7` stay hard-coded for the same reason.
+Customer `protectedIpRanges` accept a single IPv4 address or `/8`, `/16`, `/24`, `/32`. Any other form is rejected before deployment and fails closed if it is written into the function setting later. `/12` and `/10` stay hard-coded so they are not forced through the customer matcher.
 
 ## Cleanup / destroy
 
@@ -295,10 +292,8 @@ That deletes the workspace, Sentinel, the playbook, the test gateway, and a WAF 
 - Microsoft documents that an Application Gateway custom block rule is logged and **not** enforced while the policy is in Detection mode. The default here is Prevention so the probe returns 403 and the log action can be `Blocked`. The query also accepts `Detected` so a Detection-mode log can still open an incident. If a live workspace shows a different `Action` value, change the query after you see that value. Do not add action names that have not been observed.
 - Front Door log rows use `Block` and `Log`, not `Blocked`. The Front Door queries in this repo follow that. They are not deployed against a Front Door diagnostic setting this repo creates.
 - `AzureFrontDoorWebApplicationFirewallLog` is optional and unconfirmed. The default Front Door query uses `AzureDiagnostics` and `Category == "FrontDoorWebApplicationFirewallLog"`, which is the schema Microsoft documents.
-- The function's customer-range matcher is exact IP, IPv4 `/8`, `/16`, `/24`, and `/32`, and IPv6 `/16`, `/32`, `/48`, `/64`, `/80`, `/96`, `/112`, and `/128` only.
-- Azure Application Gateway does not support IPv6 as an IP block source. The function records an identified IPv6 address and does not add it to `SentinelAutoBlock` on that provider. An IPv6 value already stored on that rule is sent back on the next PUT and can cause the update to fail. Front Door does write the expanded address. A compressed IPv6 value already on a Front Door rule is a different string, so it is not treated as a duplicate.
-- The deployed playbook is the thin Logic App, which POSTs to the Function App. `workflow.json` is not deployed. A later deploy that must keep existing WAF custom rules uses `-DeployTestWaf $false -ExistingWafPolicyName <policy>`. That deploy does not convert the gateway to dual-stack.
-- The test gateway frontend is IPv4 only. An IPv6 client, including many mobile networks, never reaches `AGWFirewallLogs`. Carrier NAT in `100.64.0.0/10` stays protected and is not blocked.
+- The function's customer-range matcher is an IPv4 host or `/8`, `/16`, `/24`, and `/32` only. Any other incident value is rejected and is not written. An incident with no IPv4 address does not GET the policy. A mixed incident still PUTs the IPv4 addresses. An address already stored on the named rule is copied back as an exact string.
+- The deployed playbook is the thin Logic App, which POSTs to the Function App. `workflow.json` is not deployed. A later deploy that must keep existing WAF custom rules uses `-DeployTestWaf $false -ExistingWafPolicyName <policy>`. That deploy leaves the gateway frontend on IPv4.
 - Network Contributor on the policy is wider than "edit one custom rule". A custom role was not invented here.
 - The PUT does not use `If-Match`. A concurrent policy edit can be overwritten. The PUT is not retried.
 - No automatic unblock, no expiry, and no analyst approval gate inside Sentinel. Pass `-AutoBlockEnabled $false` to stop WAF writes.

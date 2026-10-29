@@ -130,328 +130,11 @@
         ]
       }
     },
-    "Initialize_unsupported_v6": {
-      "type": "InitializeVariable",
-      "inputs": {
-        "variables": [
-          {
-            "name": "unsupportedV6",
-            "type": "array",
-            "value": []
-          }
-        ]
-      },
-      "runAfter": {
-        "Entities_-_Get_IPs": [
-          "Succeeded"
-        ]
-      }
-    },
-    "Filter_protected_v4": {
-      "type": "Query",
-      "inputs": {
-        "from": "@parameters('protectedIpRanges')",
-        "where": "@not(contains(item(), ':'))"
-      },
-      "runAfter": {
-        "Initialize_candidates": [
-          "Succeeded"
-        ],
-        "Initialize_rejected": [
-          "Succeeded"
-        ]
-      }
-    },
-    "Filter_protected_v6": {
-      "type": "Query",
-      "inputs": {
-        "from": "@parameters('protectedIpRanges')",
-        "where": "@contains(item(), ':')"
-      },
-      "runAfter": {
-        "Initialize_candidates": [
-          "Succeeded"
-        ],
-        "Initialize_rejected": [
-          "Succeeded"
-        ]
-      }
-    },
-    "For_each_protected_v6": {
-      "type": "Foreach",
-      "foreach": "@body('Filter_protected_v6')",
-      "runtimeConfiguration": {
-        "concurrency": {
-          "repetitions": 1
-        }
-      },
-      "actions": {
-        "Compose_v6_range_address": {
-          "type": "Compose",
-          "inputs": "@first(split(item(), '/'))",
-          "runAfter": {}
-        },
-        "Check_v6_range_group_count": {
-          "type": "If",
-          "expression": {
-            "not": {
-              "equals": [
-                "@length(split(outputs('Compose_v6_range_address'), ':'))",
-                8
-              ]
-            }
-          },
-          "actions": {
-            "Append_unsupported_v6_count": {
-              "type": "AppendToArrayVariable",
-              "inputs": {
-                "name": "unsupportedV6",
-                "value": "@item()"
-              },
-              "runAfter": {}
-            }
-          },
-          "else": {
-            "actions": {
-              "Check_v6_range_group_width": {
-                "type": "If",
-                "expression": {
-                  "or": [
-                    {
-                      "not": {
-                        "equals": [
-                          "@length(split(outputs('Compose_v6_range_address'), ':')[0])",
-                          4
-                        ]
-                      }
-                    },
-                    {
-                      "not": {
-                        "equals": [
-                          "@length(split(outputs('Compose_v6_range_address'), ':')[1])",
-                          4
-                        ]
-                      }
-                    },
-                    {
-                      "not": {
-                        "equals": [
-                          "@length(split(outputs('Compose_v6_range_address'), ':')[2])",
-                          4
-                        ]
-                      }
-                    },
-                    {
-                      "not": {
-                        "equals": [
-                          "@length(split(outputs('Compose_v6_range_address'), ':')[3])",
-                          4
-                        ]
-                      }
-                    },
-                    {
-                      "not": {
-                        "equals": [
-                          "@length(split(outputs('Compose_v6_range_address'), ':')[4])",
-                          4
-                        ]
-                      }
-                    },
-                    {
-                      "not": {
-                        "equals": [
-                          "@length(split(outputs('Compose_v6_range_address'), ':')[5])",
-                          4
-                        ]
-                      }
-                    },
-                    {
-                      "not": {
-                        "equals": [
-                          "@length(split(outputs('Compose_v6_range_address'), ':')[6])",
-                          4
-                        ]
-                      }
-                    },
-                    {
-                      "not": {
-                        "equals": [
-                          "@length(split(outputs('Compose_v6_range_address'), ':')[7])",
-                          4
-                        ]
-                      }
-                    }
-                  ]
-                },
-                "actions": {
-                  "Append_unsupported_v6_width": {
-                    "type": "AppendToArrayVariable",
-                    "inputs": {
-                      "name": "unsupportedV6",
-                      "value": "@item()"
-                    },
-                    "runAfter": {}
-                  }
-                },
-                "else": {
-                  "actions": {
-                    "Check_v6_range_unusable": {
-                      "type": "If",
-                      "expression": {
-                        "or": [
-                          {
-                            "greater": [
-                              "@length(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(outputs('Compose_v6_range_address'), '0', ''), '1', ''), '2', ''), '3', ''), '4', ''), '5', ''), '6', ''), '7', ''), '8', ''), '9', ''), 'a', ''), 'b', ''), 'c', ''), 'd', ''), 'e', ''), 'f', ''), ':', ''))",
-                              0
-                            ]
-                          },
-                          {
-                            "and": [
-                              {
-                                "equals": [
-                                  "@split(outputs('Compose_v6_range_address'), ':')[0]",
-                                  "0000"
-                                ]
-                              },
-                              {
-                                "equals": [
-                                  "@split(outputs('Compose_v6_range_address'), ':')[1]",
-                                  "0000"
-                                ]
-                              },
-                              {
-                                "equals": [
-                                  "@split(outputs('Compose_v6_range_address'), ':')[2]",
-                                  "0000"
-                                ]
-                              },
-                              {
-                                "equals": [
-                                  "@split(outputs('Compose_v6_range_address'), ':')[3]",
-                                  "0000"
-                                ]
-                              },
-                              {
-                                "equals": [
-                                  "@split(outputs('Compose_v6_range_address'), ':')[4]",
-                                  "0000"
-                                ]
-                              },
-                              {
-                                "equals": [
-                                  "@split(outputs('Compose_v6_range_address'), ':')[5]",
-                                  "ffff"
-                                ]
-                              }
-                            ]
-                          },
-                          {
-                            "contains": [
-                              "@outputs('Compose_v6_range_address')",
-                              "."
-                            ]
-                          },
-                          {
-                            "contains": [
-                              "@item()",
-                              "%"
-                            ]
-                          },
-                          {
-                            "contains": [
-                              "@item()",
-                              " "
-                            ]
-                          },
-                          {
-                            "contains": [
-                              "@item()",
-                              ","
-                            ]
-                          },
-                          {
-                            "and": [
-                              {
-                                "contains": [
-                                  "@item()",
-                                  "/"
-                                ]
-                              },
-                              {
-                                "not": {
-                                  "equals": [
-                                    "@length(split(item(), '/'))",
-                                    2
-                                  ]
-                                }
-                              }
-                            ]
-                          },
-                          {
-                            "and": [
-                              {
-                                "contains": [
-                                  "@item()",
-                                  "/"
-                                ]
-                              },
-                              {
-                                "not": {
-                                  "contains": [
-                                    "@createArray('16', '32', '48', '64', '80', '96', '112', '128')",
-                                    "@last(split(item(), '/'))"
-                                  ]
-                                }
-                              }
-                            ]
-                          }
-                        ]
-                      },
-                      "actions": {
-                        "Append_unsupported_v6_shape": {
-                          "type": "AppendToArrayVariable",
-                          "inputs": {
-                            "name": "unsupportedV6",
-                            "value": "@item()"
-                          },
-                          "runAfter": {}
-                        }
-                      },
-                      "else": {
-                        "actions": {}
-                      },
-                      "runAfter": {}
-                    }
-                  }
-                },
-                "runAfter": {}
-              }
-            }
-          },
-          "runAfter": {
-            "Compose_v6_range_address": [
-              "Succeeded"
-            ]
-          }
-        }
-      },
-      "runAfter": {
-        "Filter_protected_v6": [
-          "Succeeded"
-        ],
-        "Initialize_unsupported_v6": [
-          "Succeeded"
-        ]
-      }
-    },
     "Compose_unsupported_ranges": {
       "type": "Compose",
-      "inputs": "@union(union(body('Filter_unsupported_ranges'), json('[]')), union(variables('unsupportedV6'), json('[]')))",
+      "inputs": "@union(body('Filter_unsupported_ranges'), json('[]'))",
       "runAfter": {
         "Filter_unsupported_ranges": [
-          "Succeeded"
-        ],
-        "For_each_protected_v6": [
           "Succeeded"
         ]
       }
@@ -459,11 +142,14 @@
     "Filter_unsupported_ranges": {
       "type": "Query",
       "inputs": {
-        "from": "@body('Filter_protected_v4')",
-        "where": "@not(and(not(empty(item())),not(contains(item(), ':')),not(contains(item(), ' ')),not(contains(item(), ',')),equals(length(split(first(split(item(), '/')), '.')), 4),greaterOrEquals(int(split(first(split(item(), '/')), '.')[0]), 0),lessOrEquals(int(split(first(split(item(), '/')), '.')[0]), 255),greaterOrEquals(int(split(first(split(item(), '/')), '.')[1]), 0),lessOrEquals(int(split(first(split(item(), '/')), '.')[1]), 255),greaterOrEquals(int(split(first(split(item(), '/')), '.')[2]), 0),lessOrEquals(int(split(first(split(item(), '/')), '.')[2]), 255),greaterOrEquals(int(split(first(split(item(), '/')), '.')[3]), 0),lessOrEquals(int(split(first(split(item(), '/')), '.')[3]), 255),equals(string(int(split(first(split(item(), '/')), '.')[0])), split(first(split(item(), '/')), '.')[0]),equals(string(int(split(first(split(item(), '/')), '.')[1])), split(first(split(item(), '/')), '.')[1]),equals(string(int(split(first(split(item(), '/')), '.')[2])), split(first(split(item(), '/')), '.')[2]),equals(string(int(split(first(split(item(), '/')), '.')[3])), split(first(split(item(), '/')), '.')[3]),or(and(not(contains(item(), '/')), equals(length(split(item(), '.')), 4)), and(equals(length(split(item(), '/')), 2), contains(createArray('8', '16', '24', '32'), last(split(item(), '/')))))))"
+        "from": "@parameters('protectedIpRanges')",
+        "where": "@if(or(empty(item()),contains(item(), ':'),contains(item(), ' '),contains(item(), ',')),true,not(and(equals(length(split(first(split(item(), '/')), '.')), 4),greaterOrEquals(int(split(first(split(item(), '/')), '.')[0]), 0),lessOrEquals(int(split(first(split(item(), '/')), '.')[0]), 255),greaterOrEquals(int(split(first(split(item(), '/')), '.')[1]), 0),lessOrEquals(int(split(first(split(item(), '/')), '.')[1]), 255),greaterOrEquals(int(split(first(split(item(), '/')), '.')[2]), 0),lessOrEquals(int(split(first(split(item(), '/')), '.')[2]), 255),greaterOrEquals(int(split(first(split(item(), '/')), '.')[3]), 0),lessOrEquals(int(split(first(split(item(), '/')), '.')[3]), 255),equals(string(int(split(first(split(item(), '/')), '.')[0])), split(first(split(item(), '/')), '.')[0]),equals(string(int(split(first(split(item(), '/')), '.')[1])), split(first(split(item(), '/')), '.')[1]),equals(string(int(split(first(split(item(), '/')), '.')[2])), split(first(split(item(), '/')), '.')[2]),equals(string(int(split(first(split(item(), '/')), '.')[3])), split(first(split(item(), '/')), '.')[3]),or(and(not(contains(item(), '/')), equals(length(split(item(), '.')), 4)), and(equals(length(split(item(), '/')), 2), contains(createArray('8', '16', '24', '32'), last(split(item(), '/'))))))))"
       },
       "runAfter": {
-        "Filter_protected_v4": [
+        "Initialize_candidates": [
+          "Succeeded"
+        ],
+        "Initialize_rejected": [
           "Succeeded"
         ]
       }
@@ -473,7 +159,7 @@
       "inputs": {
         "body": {
           "incidentArmId": "@triggerBody()?['object']?['id']",
-          "message": "<p><strong>ASE POC playbook did not evaluate the incident IPs.</strong> The WAF policy was not changed. protectedIpRanges contains a value this playbook cannot safely compare. IPv4 entries must be a single canonical address or /8, /16, /24, or /32. IPv6 entries must be eight lowercase hex groups, or that address with /16, /32, /48, /64, /80, /96, /112, or /128. No Would-block line was recorded, because an unparsed range must not be skipped.</p><p>Logic App run: @{workflow()['run']['name']}</p>"
+          "message": "<p><strong>ASE POC playbook did not evaluate the incident IPs.</strong> The WAF policy was not changed. protectedIpRanges contains a value this playbook cannot safely compare. IPv4 entries must be a single canonical address or /8, /16, /24, or /32. No Would-block line was recorded, because an unparsed range must not be skipped.</p><p>Logic App run: @{workflow()['run']['name']}</p>"
         },
         "host": {
           "connection": {
@@ -503,7 +189,7 @@
           "inputs": {
             "body": {
               "incidentArmId": "@triggerBody()?['object']?['id']",
-              "message": "<p><strong>ASE POC playbook refused to block.</strong> The WAF policy was not changed. protectedIpRanges contains a value this playbook cannot compare: @{join(outputs('Compose_unsupported_ranges'), ', ')}. IPv4 entries must be a single canonical address or /8, /16, /24, or /32. IPv6 entries must be eight lowercase hex groups, or that address with /16, /32, /48, /64, /80, /96, /112, or /128. IPv4-mapped IPv6 is not accepted. Built-in ranges such as 172.16.0.0/12 and fe80::/10 stay inside the playbook and are not passed through this parameter. No Would-block line was recorded.</p><p>Logic App run: @{workflow()['run']['name']}</p>"
+              "message": "<p><strong>ASE POC playbook refused to block.</strong> The WAF policy was not changed. protectedIpRanges contains a value this playbook cannot compare: @{join(outputs('Compose_unsupported_ranges'), ', ')}. IPv4 entries must be a single canonical address or /8, /16, /24, or /32. Built-in ranges such as 172.16.0.0/12 and 100.64.0.0/10 stay inside the playbook and are not passed through this parameter. No Would-block line was recorded.</p><p>Logic App run: @{workflow()['run']['name']}</p>"
             },
             "host": {
               "connection": {
@@ -586,217 +272,6 @@
           },
           "else": {
             "actions": {
-              "Check_IPv6_address": {
-                "type": "If",
-                "expression": {
-                  "contains": [
-                    "@coalesce(items('For_each_IP')?['Address'], '')",
-                    ":"
-                  ]
-                },
-                "actions": {
-                  "Check_v6_group_count": {
-                    "type": "If",
-                    "expression": {
-                      "not": {
-                        "equals": [
-                          "@length(split(items('For_each_IP')?['Address'], ':'))",
-                          8
-                        ]
-                      }
-                    },
-                    "actions": {
-                      "Append_rejected_v6_count": {
-                        "type": "AppendToArrayVariable",
-                        "inputs": {
-                          "name": "rejected",
-                          "value": "@{items('For_each_IP')?['Address']} rejected: invalid IPv6"
-                        },
-                        "runAfter": {}
-                      }
-                    },
-                    "else": {
-                      "actions": {
-                        "Check_v6_group_width": {
-                          "type": "If",
-                          "expression": {
-                            "or": [
-                              { "not": { "equals": [ "@length(split(items('For_each_IP')?['Address'], ':')[0])", 4 ] } },
-                              { "not": { "equals": [ "@length(split(items('For_each_IP')?['Address'], ':')[1])", 4 ] } },
-                              { "not": { "equals": [ "@length(split(items('For_each_IP')?['Address'], ':')[2])", 4 ] } },
-                              { "not": { "equals": [ "@length(split(items('For_each_IP')?['Address'], ':')[3])", 4 ] } },
-                              { "not": { "equals": [ "@length(split(items('For_each_IP')?['Address'], ':')[4])", 4 ] } },
-                              { "not": { "equals": [ "@length(split(items('For_each_IP')?['Address'], ':')[5])", 4 ] } },
-                              { "not": { "equals": [ "@length(split(items('For_each_IP')?['Address'], ':')[6])", 4 ] } },
-                              { "not": { "equals": [ "@length(split(items('For_each_IP')?['Address'], ':')[7])", 4 ] } }
-                            ]
-                          },
-                          "actions": {
-                            "Append_rejected_v6_width": {
-                              "type": "AppendToArrayVariable",
-                              "inputs": {
-                                "name": "rejected",
-                                "value": "@{items('For_each_IP')?['Address']} rejected: invalid IPv6"
-                              },
-                              "runAfter": {}
-                            }
-                          },
-                          "else": {
-                            "actions": {
-                              "Check_v6_lexicon_or_mapped": {
-                                "type": "If",
-                                "expression": {
-                                  "or": [
-                                    {
-                                      "greater": [
-                                        "@length(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(items('For_each_IP')?['Address'], '0', ''), '1', ''), '2', ''), '3', ''), '4', ''), '5', ''), '6', ''), '7', ''), '8', ''), '9', ''), 'a', ''), 'b', ''), 'c', ''), 'd', ''), 'e', ''), 'f', ''), ':', ''))",
-                                        0
-                                      ]
-                                    },
-                                    {
-                                      "and": [
-                                        { "equals": [ "@split(items('For_each_IP')?['Address'], ':')[0]", "0000" ] },
-                                        { "equals": [ "@split(items('For_each_IP')?['Address'], ':')[1]", "0000" ] },
-                                        { "equals": [ "@split(items('For_each_IP')?['Address'], ':')[2]", "0000" ] },
-                                        { "equals": [ "@split(items('For_each_IP')?['Address'], ':')[3]", "0000" ] },
-                                        { "equals": [ "@split(items('For_each_IP')?['Address'], ':')[4]", "0000" ] },
-                                        { "equals": [ "@split(items('For_each_IP')?['Address'], ':')[5]", "ffff" ] }
-                                      ]
-                                    }
-                                  ]
-                                },
-                                "actions": {
-                                  "Append_rejected_v6_lexicon_or_mapped": {
-                                    "type": "AppendToArrayVariable",
-                                    "inputs": {
-                                      "name": "rejected",
-                                      "value": "@{items('For_each_IP')?['Address']} @{if(greater(length(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(items('For_each_IP')?['Address'], '0', ''), '1', ''), '2', ''), '3', ''), '4', ''), '5', ''), '6', ''), '7', ''), '8', ''), '9', ''), 'a', ''), 'b', ''), 'c', ''), 'd', ''), 'e', ''), 'f', ''), ':', '')), 0), 'rejected: invalid IPv6', 'rejected: IPv4-mapped IPv6')}"
-                                    },
-                                    "runAfter": {}
-                                  }
-                                },
-                                "else": {
-                                  "actions": {
-                                          "Check_v6_builtin": {
-                                            "type": "If",
-                                            "expression": {
-                                              "and": [
-                                                { "equals": [ "@parameters('overrideProtectedRanges')", false ] },
-                                                {
-                                                  "or": [
-                                                    {
-                                                      "and": [
-                                                        { "equals": [ "@split(items('For_each_IP')?['Address'], ':')[0]", "0000" ] },
-                                                        { "equals": [ "@split(items('For_each_IP')?['Address'], ':')[1]", "0000" ] },
-                                                        { "equals": [ "@split(items('For_each_IP')?['Address'], ':')[2]", "0000" ] },
-                                                        { "equals": [ "@split(items('For_each_IP')?['Address'], ':')[3]", "0000" ] },
-                                                        { "equals": [ "@split(items('For_each_IP')?['Address'], ':')[4]", "0000" ] },
-                                                        { "equals": [ "@split(items('For_each_IP')?['Address'], ':')[5]", "0000" ] },
-                                                        { "equals": [ "@split(items('For_each_IP')?['Address'], ':')[6]", "0000" ] },
-                                                        { "equals": [ "@split(items('For_each_IP')?['Address'], ':')[7]", "0000" ] }
-                                                      ]
-                                                    },
-                                                    {
-                                                      "and": [
-                                                        { "equals": [ "@split(items('For_each_IP')?['Address'], ':')[0]", "0000" ] },
-                                                        { "equals": [ "@split(items('For_each_IP')?['Address'], ':')[1]", "0000" ] },
-                                                        { "equals": [ "@split(items('For_each_IP')?['Address'], ':')[2]", "0000" ] },
-                                                        { "equals": [ "@split(items('For_each_IP')?['Address'], ':')[3]", "0000" ] },
-                                                        { "equals": [ "@split(items('For_each_IP')?['Address'], ':')[4]", "0000" ] },
-                                                        { "equals": [ "@split(items('For_each_IP')?['Address'], ':')[5]", "0000" ] },
-                                                        { "equals": [ "@split(items('For_each_IP')?['Address'], ':')[6]", "0000" ] },
-                                                        { "equals": [ "@split(items('For_each_IP')?['Address'], ':')[7]", "0001" ] }
-                                                      ]
-                                                    },
-                                                    {
-                                                      "and": [
-                                                        { "greaterOrEquals": [ "@split(items('For_each_IP')?['Address'], ':')[0]", "fe80" ] },
-                                                        { "lessOrEquals": [ "@split(items('For_each_IP')?['Address'], ':')[0]", "febf" ] }
-                                                      ]
-                                                    },
-                                                    {
-                                                      "and": [
-                                                        { "greaterOrEquals": [ "@split(items('For_each_IP')?['Address'], ':')[0]", "fc00" ] },
-                                                        { "lessOrEquals": [ "@split(items('For_each_IP')?['Address'], ':')[0]", "fdff" ] }
-                                                      ]
-                                                    }
-                                                  ]
-                                                }
-                                              ]
-                                            },
-                                            "actions": {
-                                              "Append_rejected_v6_builtin": {
-                                                "type": "AppendToArrayVariable",
-                                                "inputs": {
-                                                  "name": "rejected",
-                                                  "value": "@{items('For_each_IP')?['Address']} rejected: protected built-in IPv6 range (unspecified, loopback, link-local, or unique local)"
-                                                },
-                                                "runAfter": {}
-                                              }
-                                            },
-                                            "else": {
-                                              "actions": {
-                                                "Filter_customer_match_v6": {
-                                                  "type": "Query",
-                                                  "inputs": {
-                                                    "from": "@parameters('protectedIpRanges')",
-                                                    "where": "@and(contains(item(), ':'), or(equals(item(), items('For_each_IP')?['Address']), and(contains(item(), '/'), or(and(endsWith(item(), '/128'), equals(first(split(item(), '/')), items('For_each_IP')?['Address'])), and(endsWith(item(), '/112'), equals(join(take(split(items('For_each_IP')?['Address'], ':'), 7), ':'), join(take(split(first(split(item(), '/')), ':'), 7), ':'))), and(endsWith(item(), '/96'), equals(join(take(split(items('For_each_IP')?['Address'], ':'), 6), ':'), join(take(split(first(split(item(), '/')), ':'), 6), ':'))), and(endsWith(item(), '/80'), equals(join(take(split(items('For_each_IP')?['Address'], ':'), 5), ':'), join(take(split(first(split(item(), '/')), ':'), 5), ':'))), and(endsWith(item(), '/64'), equals(join(take(split(items('For_each_IP')?['Address'], ':'), 4), ':'), join(take(split(first(split(item(), '/')), ':'), 4), ':'))), and(endsWith(item(), '/48'), equals(join(take(split(items('For_each_IP')?['Address'], ':'), 3), ':'), join(take(split(first(split(item(), '/')), ':'), 3), ':'))), and(endsWith(item(), '/32'), equals(join(take(split(items('For_each_IP')?['Address'], ':'), 2), ':'), join(take(split(first(split(item(), '/')), ':'), 2), ':'))), and(endsWith(item(), '/16'), equals(first(split(items('For_each_IP')?['Address'], ':')), first(split(first(split(item(), '/')), ':'))))))))"
-                                                  },
-                                                  "runAfter": {}
-                                                },
-                                                "Check_customer_protected_v6": {
-                                                  "type": "If",
-                                                  "expression": {
-                                                    "and": [
-                                                      { "equals": [ "@parameters('overrideProtectedRanges')", false ] },
-                                                      { "greater": [ "@length(body('Filter_customer_match_v6'))", 0 ] }
-                                                    ]
-                                                  },
-                                                  "actions": {
-                                                    "Append_rejected_v6_customer": {
-                                                      "type": "AppendToArrayVariable",
-                                                      "inputs": {
-                                                        "name": "rejected",
-                                                        "value": "@{items('For_each_IP')?['Address']} rejected: protectedIpRanges"
-                                                      },
-                                                      "runAfter": {}
-                                                    }
-                                                  },
-                                                  "else": {
-                                                    "actions": {
-                                                      "Append_candidate_v6": {
-                                                        "type": "AppendToArrayVariable",
-                                                        "inputs": {
-                                                          "name": "candidates",
-                                                          "value": "@items('For_each_IP')?['Address']"
-                                                        },
-                                                        "runAfter": {}
-                                                      }
-                                                    }
-                                                  },
-                                                  "runAfter": {
-                                                    "Filter_customer_match_v6": [ "Succeeded" ]
-                                                  }
-                                                }
-                                              }
-                                            },
-                                            "runAfter": {}
-                                          }
-                                        }
-                                      },
-                                      "runAfter": {}
-                                    }
-                            }
-                          },
-                          "runAfter": {}
-                        }
-                      }
-                    },
-                    "runAfter": {}
-                  }
-                },
-                "else": {
-                  "actions": {
               "Parse_IPv4": {
                 "type": "Scope",
                 "actions": {
@@ -1150,9 +625,6 @@
                   ]
                 }
               }
-                }
-              }
-            }
             }
           },
           "runAfter": {}
@@ -1185,56 +657,11 @@
         ]
       }
     },
-    "Filter_distinct_v4": {
-      "type": "Query",
-      "inputs": {
-        "from": "@union(variables('candidates'), json('[]'))",
-        "where": "@not(contains(item(), ':'))"
-      },
-      "runAfter": {
-        "For_each_IP": [
-          "Succeeded"
-        ]
-      }
-    },
-    "Filter_distinct_v6": {
-      "type": "Query",
-      "inputs": {
-        "from": "@union(variables('candidates'), json('[]'))",
-        "where": "@contains(item(), ':')"
-      },
-      "runAfter": {
-        "For_each_IP": [
-          "Succeeded"
-        ]
-      }
-    },
-    "Compose_unenforced_v6": {
-      "type": "Compose",
-      "inputs": "@if(equals(parameters('wafProvider'), 'FrontDoor'), json('[]'), body('Filter_distinct_v6'))",
-      "runAfter": {
-        "Filter_distinct_v6": [
-          "Succeeded"
-        ]
-      }
-    },
-    "Compose_unenforced_note": {
-      "type": "Compose",
-      "inputs": "@if(empty(outputs('Compose_unenforced_v6')), '', concat('<p>Identified IPv6: ', join(outputs('Compose_unenforced_v6'), ', '), '. IPv6 is written only when wafProvider is Front Door. Application Gateway IPMatch does not enforce IPv6, so these addresses were not written.</p>'))",
-      "runAfter": {
-        "Compose_unenforced_v6": [
-          "Succeeded"
-        ]
-      }
-    },
     "Compose_distinct_candidates": {
       "type": "Compose",
-      "inputs": "@if(equals(parameters('wafProvider'), 'FrontDoor'), union(variables('candidates'), json('[]')), body('Filter_distinct_v4'))",
+      "inputs": "@union(variables('candidates'), json('[]'))",
       "runAfter": {
-        "Filter_distinct_v4": [
-          "Succeeded"
-        ],
-        "Filter_distinct_v6": [
+        "For_each_IP": [
           "Succeeded"
         ]
       }
@@ -1248,46 +675,6 @@
         ]
       },
       "actions": {
-        "Check_only_unenforced_v6": {
-          "type": "If",
-          "expression": {
-            "greater": [
-              "@length(outputs('Compose_unenforced_v6'))",
-              0
-            ]
-          },
-          "actions": {
-            "Add_comment_-_ipv6_not_enforced": {
-              "type": "ApiConnection",
-              "inputs": {
-                "body": {
-                  "incidentArmId": "@triggerBody()?['object']?['id']",
-                  "message": "<p><strong>ASE POC playbook did not change the WAF policy.</strong> Incident @{coalesce(triggerBody()?['object']?['properties']?['incidentNumber'], '')} (@{coalesce(triggerBody()?['object']?['properties']?['title'], '')}) identified IPv6 that this provider will not write.</p><p>@{outputs('Compose_unenforced_note')}</p><p>Rejected:<br>@{if(empty(variables('rejected')), 'none', join(variables('rejected'), '<br>'))}</p><p>Logic App run: @{workflow()['run']['name']}</p>"
-                },
-                "host": {
-                  "connection": {
-                    "name": "@parameters('$connections')['azuresentinel']['connectionId']"
-                  }
-                },
-                "method": "post",
-                "path": "/Incidents/Comment"
-              },
-              "runAfter": {}
-            },
-            "Terminate_-_ipv6_not_enforced": {
-              "type": "Terminate",
-              "inputs": {
-                "runStatus": "Succeeded"
-              },
-              "runAfter": {
-                "Add_comment_-_ipv6_not_enforced": [
-                  "Succeeded"
-                ]
-              }
-            }
-          },
-          "else": {
-            "actions": {
         "Add_comment_-_nothing_to_block": {
           "type": "ApiConnection",
           "inputs": {
@@ -1316,18 +703,12 @@
             ]
           }
         }
-            }
-          }
-        }
       },
       "else": {
         "actions": {}
       },
       "runAfter": {
         "Compose_distinct_candidates": [
-          "Succeeded"
-        ],
-        "Compose_unenforced_note": [
           "Succeeded"
         ]
       }
@@ -1359,7 +740,7 @@
       "inputs": {
         "body": {
           "incidentArmId": "@triggerBody()?['object']?['id']",
-          "message": "<p><strong>ASE POC playbook could not read the WAF policy.</strong> The policy was not changed, and no Would-block line was recorded, because the current block list is unknown. Confirm the playbook managed identity has Network Contributor on @{parameters('wafPolicyResourceId')} and that wafProvider (@{parameters('wafProvider')}) matches that resource.</p><p>Candidates: @{join(outputs('Compose_distinct_candidates'), ', ')}</p>@{outputs('Compose_unenforced_note')}<p>Logic App run: @{workflow()['run']['name']}</p>"
+          "message": "<p><strong>ASE POC playbook could not read the WAF policy.</strong> The policy was not changed, and no Would-block line was recorded, because the current block list is unknown. Confirm the playbook managed identity has Network Contributor on @{parameters('wafPolicyResourceId')} and that wafProvider (@{parameters('wafProvider')}) matches that resource.</p><p>Candidates: @{join(outputs('Compose_distinct_candidates'), ', ')}</p><p>Logic App run: @{workflow()['run']['name']}</p>"
         },
         "host": {
           "connection": {
@@ -1398,7 +779,7 @@
       "inputs": {
         "body": {
           "incidentArmId": "@triggerBody()?['object']?['id']",
-          "message": "<p><strong>ASE POC playbook could not read custom rules from the WAF policy.</strong> The policy was not changed. wafProvider is @{parameters('wafProvider')}. Application Gateway stores custom rules as an array. Front Door stores them under customRules.rules. Confirm the provider matches @{parameters('wafPolicyResourceId')}.</p>@{outputs('Compose_unenforced_note')}<p>Logic App run: @{workflow()['run']['name']}</p>"
+          "message": "<p><strong>ASE POC playbook could not read custom rules from the WAF policy.</strong> The policy was not changed. wafProvider is @{parameters('wafProvider')}. Application Gateway stores custom rules as an array. Front Door stores them under customRules.rules. Confirm the provider matches @{parameters('wafPolicyResourceId')}.</p><p>Logic App run: @{workflow()['run']['name']}</p>"
         },
         "host": {
           "connection": {
@@ -1488,7 +869,7 @@
           "inputs": {
             "body": {
               "incidentArmId": "@triggerBody()?['object']?['id']",
-              "message": "<p><strong>ASE POC playbook made no change.</strong> @{join(outputs('Compose_distinct_candidates'), ', ')} is already on custom rule @{parameters('blockRuleName')}. The WAF policy was not written again.</p><p>Rejected:<br>@{if(empty(variables('rejected')), 'none', join(variables('rejected'), '<br>'))}</p>@{outputs('Compose_unenforced_note')}<p>Logic App run: @{workflow()['run']['name']}</p>"
+              "message": "<p><strong>ASE POC playbook made no change.</strong> @{join(outputs('Compose_distinct_candidates'), ', ')} is already on custom rule @{parameters('blockRuleName')}. The WAF policy was not written again.</p><p>Rejected:<br>@{if(empty(variables('rejected')), 'none', join(variables('rejected'), '<br>'))}</p><p>Logic App run: @{workflow()['run']['name']}</p>"
             },
             "host": {
               "connection": {
@@ -1538,7 +919,7 @@
           "inputs": {
             "body": {
               "incidentArmId": "@triggerBody()?['object']?['id']",
-              "message": "<p><strong>ASE POC playbook did not update the WAF policy.</strong> Adding @{join(body('Filter_new_addresses'), ', ')} would exceed maximumBlockEntries (@{parameters('maximumBlockEntries')}). Current list size: @{length(outputs('Compose_existing_match_values'))}. Remove stale addresses from @{parameters('blockRuleName')} before retrying.</p>@{outputs('Compose_unenforced_note')}<p>Logic App run: @{workflow()['run']['name']}</p>"
+              "message": "<p><strong>ASE POC playbook did not update the WAF policy.</strong> Adding @{join(body('Filter_new_addresses'), ', ')} would exceed maximumBlockEntries (@{parameters('maximumBlockEntries')}). Current list size: @{length(outputs('Compose_existing_match_values'))}. Remove stale addresses from @{parameters('blockRuleName')} before retrying.</p><p>Logic App run: @{workflow()['run']['name']}</p>"
             },
             "host": {
               "connection": {
@@ -1659,7 +1040,7 @@
               "inputs": {
                 "body": {
                   "incidentArmId": "@triggerBody()?['object']?['id']",
-                  "message": "<p><strong>ASE POC playbook updated the Front Door WAF policy.</strong> Incident @{coalesce(triggerBody()?['object']?['properties']?['incidentNumber'], '')} (@{coalesce(triggerBody()?['object']?['properties']?['title'], '')}).</p><p>@{join(body('Select_blocked_lines_front_door'), '<br>')}</p><p>Custom rule @{parameters('blockRuleName')}, matchVariable RemoteAddr, operator IPMatch, action Block, priority @{parameters('blockRulePriority')}. List size @{length(outputs('Compose_merged_addresses'))} of @{parameters('maximumBlockEntries')}. Other custom rules, including the simulated probe rule, were kept.</p><p>Rejected:<br>@{if(empty(variables('rejected')), 'none', join(variables('rejected'), '<br>'))}</p><p>Policy: @{parameters('wafPolicyResourceId')}</p><p>There is no automatic expiry. Rollback is an operator action. @{outputs('Compose_unenforced_note')}Logic App run: @{workflow()['run']['name']}</p>"
+                  "message": "<p><strong>ASE POC playbook updated the Front Door WAF policy.</strong> Incident @{coalesce(triggerBody()?['object']?['properties']?['incidentNumber'], '')} (@{coalesce(triggerBody()?['object']?['properties']?['title'], '')}).</p><p>@{join(body('Select_blocked_lines_front_door'), '<br>')}</p><p>Custom rule @{parameters('blockRuleName')}, matchVariable RemoteAddr, operator IPMatch, action Block, priority @{parameters('blockRulePriority')}. List size @{length(outputs('Compose_merged_addresses'))} of @{parameters('maximumBlockEntries')}. Other custom rules, including the simulated probe rule, were kept.</p><p>Rejected:<br>@{if(empty(variables('rejected')), 'none', join(variables('rejected'), '<br>'))}</p><p>Policy: @{parameters('wafPolicyResourceId')}</p><p>There is no automatic expiry. Rollback is an operator action. Logic App run: @{workflow()['run']['name']}</p>"
                 },
                 "host": {
                   "connection": {
@@ -1692,7 +1073,7 @@
               "inputs": {
                 "body": {
                   "incidentArmId": "@triggerBody()?['object']?['id']",
-                  "message": "<p><strong>ASE POC playbook failed while updating the Front Door WAF policy.</strong> Do not assume @{join(body('Filter_new_addresses'), ', ')} was blocked. Read the policy before you retry. @{outputs('Compose_unenforced_note')}Logic App run: @{workflow()['run']['name']}</p>"
+                  "message": "<p><strong>ASE POC playbook failed while updating the Front Door WAF policy.</strong> Do not assume @{join(body('Filter_new_addresses'), ', ')} was blocked. Read the policy before you retry. Logic App run: @{workflow()['run']['name']}</p>"
                 },
                 "host": {
                   "connection": {
@@ -1805,7 +1186,7 @@
                     "inputs": {
                       "body": {
                         "incidentArmId": "@triggerBody()?['object']?['id']",
-                        "message": "<p><strong>ASE POC playbook updated the Application Gateway WAF policy.</strong> Incident @{coalesce(triggerBody()?['object']?['properties']?['incidentNumber'], '')} (@{coalesce(triggerBody()?['object']?['properties']?['title'], '')}).</p><p>@{join(body('Select_blocked_lines_application_gateway'), '<br>')}</p><p>Custom rule @{parameters('blockRuleName')}, variable RemoteAddr, operator IPMatch, action Block, priority @{parameters('blockRulePriority')}. List size @{length(outputs('Compose_merged_addresses'))} of @{parameters('maximumBlockEntries')}. Other custom rules, including the simulated probe rule, were kept. Read-only policy links were not sent back on the PUT.</p><p>Rejected:<br>@{if(empty(variables('rejected')), 'none', join(variables('rejected'), '<br>'))}</p><p>Policy: @{parameters('wafPolicyResourceId')}</p><p>There is no automatic expiry. Rollback is an operator action. @{outputs('Compose_unenforced_note')}Logic App run: @{workflow()['run']['name']}</p>"
+                        "message": "<p><strong>ASE POC playbook updated the Application Gateway WAF policy.</strong> Incident @{coalesce(triggerBody()?['object']?['properties']?['incidentNumber'], '')} (@{coalesce(triggerBody()?['object']?['properties']?['title'], '')}).</p><p>@{join(body('Select_blocked_lines_application_gateway'), '<br>')}</p><p>Custom rule @{parameters('blockRuleName')}, variable RemoteAddr, operator IPMatch, action Block, priority @{parameters('blockRulePriority')}. List size @{length(outputs('Compose_merged_addresses'))} of @{parameters('maximumBlockEntries')}. Other custom rules, including the simulated probe rule, were kept. Read-only policy links were not sent back on the PUT.</p><p>Rejected:<br>@{if(empty(variables('rejected')), 'none', join(variables('rejected'), '<br>'))}</p><p>Policy: @{parameters('wafPolicyResourceId')}</p><p>There is no automatic expiry. Rollback is an operator action. Logic App run: @{workflow()['run']['name']}</p>"
                       },
                       "host": {
                         "connection": {
@@ -1826,7 +1207,7 @@
                     "inputs": {
                       "body": {
                         "incidentArmId": "@triggerBody()?['object']?['id']",
-                        "message": "<p><strong>ASE POC playbook failed while updating the Application Gateway WAF policy.</strong> Do not assume @{join(body('Filter_new_addresses'), ', ')} was blocked. Read the policy before you retry. @{outputs('Compose_unenforced_note')}Logic App run: @{workflow()['run']['name']}</p>"
+                        "message": "<p><strong>ASE POC playbook failed while updating the Application Gateway WAF policy.</strong> Do not assume @{join(body('Filter_new_addresses'), ', ')} was blocked. Read the policy before you retry. Logic App run: @{workflow()['run']['name']}</p>"
                       },
                       "host": {
                         "connection": {
@@ -1851,7 +1232,7 @@
                       "inputs": {
                         "body": {
                           "incidentArmId": "@triggerBody()?['object']?['id']",
-                          "message": "<p><strong>ASE POC playbook did not change the WAF policy.</strong> wafProvider '@{parameters('wafProvider')}' is not ApplicationGateway or FrontDoor. Candidates that would have been considered: @{join(body('Filter_new_addresses'), ', ')}.</p>@{outputs('Compose_unenforced_note')}<p>Logic App run: @{workflow()['run']['name']}</p>"
+                          "message": "<p><strong>ASE POC playbook did not change the WAF policy.</strong> wafProvider '@{parameters('wafProvider')}' is not ApplicationGateway or FrontDoor. Candidates that would have been considered: @{join(body('Filter_new_addresses'), ', ')}.</p><p>Logic App run: @{workflow()['run']['name']}</p>"
                         },
                         "host": {
                           "connection": {
@@ -1898,7 +1279,7 @@
             "inputs": {
               "body": {
                 "incidentArmId": "@triggerBody()?['object']?['id']",
-                "message": "<p><strong>ASE POC playbook dry-run.</strong> autoBlockEnabled is false. The WAF policy was not changed. Incident @{coalesce(triggerBody()?['object']?['properties']?['incidentNumber'], '')} (@{coalesce(triggerBody()?['object']?['properties']?['title'], '')}).</p><p>@{join(body('Select_dry_run_lines'), '<br>')}</p><p>Provider: @{parameters('wafProvider')}. Policy: @{parameters('wafPolicyResourceId')}. Custom rule that would be updated: @{parameters('blockRuleName')}. Resulting list size if blocking were enabled: @{length(outputs('Compose_merged_addresses'))} of @{parameters('maximumBlockEntries')}.</p><p>Rejected:<br>@{if(empty(variables('rejected')), 'none', join(variables('rejected'), '<br>'))}</p>@{outputs('Compose_unenforced_note')}<p>Logic App run: @{workflow()['run']['name']}</p>"
+                "message": "<p><strong>ASE POC playbook dry-run.</strong> autoBlockEnabled is false. The WAF policy was not changed. Incident @{coalesce(triggerBody()?['object']?['properties']?['incidentNumber'], '')} (@{coalesce(triggerBody()?['object']?['properties']?['title'], '')}).</p><p>@{join(body('Select_dry_run_lines'), '<br>')}</p><p>Provider: @{parameters('wafProvider')}. Policy: @{parameters('wafPolicyResourceId')}. Custom rule that would be updated: @{parameters('blockRuleName')}. Resulting list size if blocking were enabled: @{length(outputs('Compose_merged_addresses'))} of @{parameters('maximumBlockEntries')}.</p><p>Rejected:<br>@{if(empty(variables('rejected')), 'none', join(variables('rejected'), '<br>'))}</p><p>Logic App run: @{workflow()['run']['name']}</p>"
               },
               "host": {
                 "connection": {

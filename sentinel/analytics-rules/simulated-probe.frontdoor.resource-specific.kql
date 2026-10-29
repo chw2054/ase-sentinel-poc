@@ -8,12 +8,8 @@ let BlockRuleName = "__BLOCK_RULE__";
 let ProbeRuleName = "__PROBE_RULE__";
 let ProbeMarker = "__PROBE_MARKER__";
 let BuiltInProtected = dynamic(["0.0.0.0/8", "10.0.0.0/8", "127.0.0.0/8", "169.254.0.0/16", "169.254.169.254/32", "172.16.0.0/12", "192.168.0.0/16", "100.64.0.0/10"]);
-// Same expanded strings as infra/main.bicep. /10 and /7 stay here; the playbook checks those two on the address.
-let BuiltInProtectedV6 = dynamic(["0000:0000:0000:0000:0000:0000:0000:0000/128", "0000:0000:0000:0000:0000:0000:0000:0001/128", "fe80:0000:0000:0000:0000:0000:0000:0000/10", "fc00:0000:0000:0000:0000:0000:0000:0000/7"]);
-let HexVal = (c: string) { case(c == "0", 0, c == "1", 1, c == "2", 2, c == "3", 3, c == "4", 4, c == "5", 5, c == "6", 6, c == "7", 7, c == "8", 8, c == "9", 9, c == "a", 10, c == "b", 11, c == "c", 12, c == "d", 13, c == "e", 14, c == "f", 15, -1) };
-let Octet = (pair: string) { HexVal(substring(pair, 0, 1)) * 16 + HexVal(substring(pair, 1, 1)) };
-let WatchlistV4 = coalesce(toscalar(_GetWatchlist('__WATCHLIST__') | extend IPAddress = column_ifexists('IPAddress', '') | where isnotempty(IPAddress) and not(IPAddress has ":") | summarize make_list(IPAddress)), dynamic([]));
-let WatchlistV6 = coalesce(toscalar(_GetWatchlist('__WATCHLIST__') | extend IPAddress = column_ifexists('IPAddress', '') | where isnotempty(IPAddress) and IPAddress has ":" | summarize make_list(IPAddress)), dynamic([]));
+// Skip a watchlist row that ipv4_is_in_any_range cannot convert. One bad row makes that call return null and drops every client.
+let Watchlist = coalesce(toscalar(_GetWatchlist('__WATCHLIST__') | extend IPAddress = column_ifexists('IPAddress', '') | where isnotempty(IPAddress) and not(IPAddress has ":") | summarize make_list(IPAddress)), dynamic([]));
 AzureFrontDoorWebApplicationFirewallLog
 | where TimeGenerated > ago(__LOOKBACK__)
 | extend ClientIp = tostring(ClientIP), Message = tostring(column_ifexists("DetailsMsg", ""))
@@ -21,16 +17,9 @@ AzureFrontDoorWebApplicationFirewallLog
 | where RuleName != BlockRuleName
 | where RuleName == ProbeRuleName or RequestUri has ProbeMarker
 | where isnotempty(ClientIp)
-| extend RawIp = tostring(ClientIp)
-| extend ParsedV6 = iff(RawIp has ":", parse_ipv6(RawIp), "")
-| extend ClientIp = case(not(RawIp has ":"), RawIp, ParsedV6 startswith "0000:0000:0000:0000:0000:ffff:", strcat(tostring(Octet(substring(ParsedV6, 30, 2))), ".", tostring(Octet(substring(ParsedV6, 32, 2))), ".", tostring(Octet(substring(ParsedV6, 35, 2))), ".", tostring(Octet(substring(ParsedV6, 37, 2)))), isnotempty(ParsedV6), ParsedV6, "")
-| where isnotempty(ClientIp)
-| extend IsV6 = ClientIp has ":"
-| where OverrideProtected or not(IsV6) or not(ipv6_is_in_any_range(ClientIp, BuiltInProtectedV6))
-| where OverrideProtected or IsV6 or not(ipv4_is_private(ClientIp))
-| where OverrideProtected or IsV6 or not(ipv4_is_in_any_range(ClientIp, BuiltInProtected))
-| where OverrideProtected or not(IsV6) or array_length(WatchlistV6) == 0 or not(ipv6_is_in_any_range(ClientIp, WatchlistV6))
-| where OverrideProtected or IsV6 or array_length(WatchlistV4) == 0 or not(ipv4_is_in_any_range(ClientIp, WatchlistV4))
+| where OverrideProtected or not(ipv4_is_private(ClientIp))
+| where OverrideProtected or not(ipv4_is_in_any_range(ClientIp, BuiltInProtected))
+| where OverrideProtected or array_length(Watchlist) == 0 or not(ipv4_is_in_any_range(ClientIp, Watchlist))
 | summarize EventCount = dcount(TrackingReference), RuleIds = make_set(RuleName, 20), Messages = make_set(Message, 10), RequestUris = make_set(RequestUri, 10), Hostnames = make_set(Host, 5), Actions = make_set(Action, 4), FirstSeen = min(TimeGenerated), LastSeen = max(TimeGenerated) by ClientIp
 | where EventCount >= Threshold
 | extend EventCountText = tostring(EventCount), RuleIdList = strcat_array(RuleIds, ", "), MessageList = strcat_array(Messages, " | "), RequestUriList = strcat_array(RequestUris, ", "), HostnameList = strcat_array(Hostnames, ", "), ActionList = strcat_array(Actions, ", "), FirstSeenText = tostring(FirstSeen), LastSeenText = tostring(LastSeen), ProbeMarkerText = ProbeMarker

@@ -43,7 +43,7 @@ The query keeps a row when all of the following are true:
 - Application Gateway: `Action` is `Blocked` or `Detected`. Front Door: `Action` is `Block` or `Log`.
 - The rule name is not `SentinelAutoBlock`.
 - The rule name is `PocSimulatedProbe`, or the request URI contains `ase-poc-probe`.
-- The client value is a non-empty IPv4 address, or an IPv6 address. IPv6 is normalized with `parse_ipv6()` to eight lowercase hex groups. IPv4-mapped IPv6 (`::ffff:0:0/96`) is converted back to dotted IPv4 before the protected-range checks. A value that contains `:` and does not parse is dropped.
+- The client value is a non-empty dotted IPv4 address. The query uses the IPv4 range functions only.
 - Unless `overrideProtectedRanges` is true: the address is not private, not inside the built-in ranges, and not inside watchlist `AseWafIpAllowlist`.
 
 The summary is one row per client IP. Projected string columns are `ClientIp`, `EventCountText`, `RuleIdList`, `MessageList`, `RequestUriList`, `HostnameList`, `ActionList`, `FirstSeenText`, `LastSeenText`, and `ProbeMarkerText`. Sentinel custom details have to be strings. The IP entity mapping uses `ClientIp`.
@@ -93,5 +93,5 @@ Network Contributor can change more than the custom-rule list. That gap is recor
 - Microsoft Sentinel Content Hub solution for WAF. Those workbooks often assume `AzureDiagnostics`.
 - Private Link, TLS, a real backend, zones, an NSG, and customer-managed keys.
 - Automatic expiry, unblock, or an approval action inside the automation rule.
-- Enforcing an IPv6 block on Application Gateway. `IPMatch` matches IPv4 only. The test gateway frontend is IPv4, so an IPv6 client never reaches `AGWFirewallLogs`.
-- Treating compressed IPv6 already stored on a Front Door rule as the same address as the expanded form. The playbook compares strings.
+- Blocking text that is not a canonical IPv4 address. The function rejects it. The test gateway frontend is IPv4.
+- Rewriting match values already stored on the named rule. Those strings are copied back unchanged.

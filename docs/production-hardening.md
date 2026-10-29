@@ -29,7 +29,7 @@ Network Contributor on the policy is a POC shortcut. Replace it with a custom ro
 
 Pass ASE's management and egress ranges in `protectedIpRanges`. Keep the built-in private, loopback, link-local, metadata, and CGNAT checks. Do not enable `overrideProtectedRanges` to "make the test work" from an office network. Add the office egress prefix to the protected list, or run the probe from a public test host that is allowed to be listed.
 
-The function can evaluate IPv4 `/8`, `/16`, `/24`, and `/32`, and IPv6 `/16`, `/32`, `/48`, `/64`, `/80`, `/96`, `/112`, and `/128`, plus a single address in the canonical form. A production matcher has to honor the prefixes ASE actually uses, including `/12` if they put it in the customer list rather than relying on the built-in RFC1918 check. Application Gateway `IPMatch` still does not enforce IPv6; a production block of IPv6 clients needs a product that does, such as Front Door.
+The function can evaluate an IPv4 host or `/8`, `/16`, `/24`, and `/32`. A production matcher has to honor the prefixes ASE actually uses, including `/12` if they put it in the customer list rather than relying on the built-in RFC1918 check. This POC rejects any value that contains `:`.
 
 ## Hardening the test shortcuts that must not ship
 

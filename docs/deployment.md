@@ -28,7 +28,7 @@ Outputs include the workspace name, workspace resource id, policy id, playbook n
 - An existing resource id must be the ARM type for the selected provider
 - `-AutoBlockEnabled` defaults to `$true`. `$false` deploys a dry-run. `-ConfirmAutoBlock` is accepted and is not required
 - `-OverrideProtectedRanges $true` requires `-ConfirmOverrideProtectedRanges`
-- Each `ProtectedIpRanges` entry is an IPv4 address or `/8`, `/16`, `/24`, `/32`, or an IPv6 address or `/16`, `/32`, `/48`, `/64`, `/80`, `/96`, `/112`, `/128`. The script expands IPv6 to eight lowercase hex groups before deployment.
+- Each `ProtectedIpRanges` entry is an IPv4 address or `/8`, `/16`, `/24`, `/32`. Any other form is rejected.
 - `NamePrefix` is 3 to 24 characters of lowercase letters, digits, and hyphens
 - `ProbeMarker` is 3 to 40 letters, digits, and hyphens, so it cannot break the KQL string it is substituted into
 

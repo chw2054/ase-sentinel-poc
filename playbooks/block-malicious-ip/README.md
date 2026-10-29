@@ -4,7 +4,7 @@ Deployed Logic App definition: `thin-workflow.json`. Bicep passes the function U
 
 The playbook is started by the Sentinel incident trigger. It reads IP entities and POSTs them to `POST /api/SentinelWafAutoBlock`. It does not validate addresses and it does not PUT the WAF policy. The Python function does that work. `AUTO_BLOCK_ENABLED` defaults to the JSON boolean `true` on the Function App. `false` is dry-run.
 
-Azure Application Gateway does not support IPv6 as an IP block source. The function records a validated IPv6 address and does not add it to `matchValues`. Front Door writes the expanded address. A customer prefix the function cannot compare stops the run before any would-block line. IPv4 prefixes are `/8`, `/16`, `/24`, and `/32`. IPv6 prefixes are `/16`, `/32`, `/48`, `/64`, `/80`, `/96`, `/112`, and `/128`.
+The function accepts an IPv4 host, or a customer prefix of `/8`, `/16`, `/24`, or `/32`. Any other incident value is rejected and is not written to the WAF rule. A customer prefix the function cannot compare stops the run before any would-block line.
 
 The playbook identity needs Microsoft Sentinel Responder on the workspace resource group. The function identity needs that role and Network Contributor on the one WAF policy. Both assignments are in the Bicep modules.
 

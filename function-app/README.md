@@ -33,7 +33,7 @@ Incidents group by the IP entity for 12 hours, and a closed incident is not reop
 
 `ipEntities` is an array of strings. The function does not read `autoBlockEnabled` from this body. Enforcement comes only from configuration.
 
-The response is the structured result: `status`, `changed`, `candidate_addresses`, `new_addresses`, `rejected_addresses`, `unenforced_addresses`, `existing_count`, `resulting_count`, `reason`. The function also writes one incident comment. The Logic App should not write a second copy.
+The response is the structured result: `status`, `changed`, `candidate_addresses`, `new_addresses`, `rejected_addresses`, `existing_count`, `resulting_count`, `reason`. The function also writes one incident comment. The Logic App should not write a second copy.
 
 ## Managed Identity
 
@@ -95,30 +95,23 @@ The tests mock ARM and Sentinel. They do not need a subscription or a network co
 
 App settings carry the configuration. Boolean and numeric settings are JSON tokens (`true`, `false`, `100`), because the loader uses `json.loads` and does not treat the string `"true"` as enforcement. Host storage uses `AzureWebJobsStorage__credential=managedidentity`. The function key stays in the Logic App secure parameter. Neither a storage key nor the function key is written to the repository.
 
+## Teams notification
+
+`NOTIFY_TEAMS_URL` is the optional Teams Workflows endpoint ("When a Teams webhook request is received"). When it is set, the function posts an Adaptive Card after the decision. `NOTIFY_EVENTS` is a comma-separated filter. An empty setting uses `would_block,blocked,put_failed,capacity`. A dry-run emits `would_block` and is posted only when that event is listed. A notification failure never changes the decision result: the HTTP response keeps its status, and the incident comment records `The Teams notification was not delivered` with the failure reason. The URL is a secret; errors and logs carry only a status, never the URL. Store it as a Key Vault reference in the app setting.
+
 ## Prefix allow-list
 
 Built-in networks always apply unless `overrideProtectedRanges` is JSON `true`:
 
 - IPv4: `0.0.0.0/8`, `10.0.0.0/8`, `100.64.0.0/10`, `127.0.0.0/8`, `169.254.0.0/16` (includes `169.254.169.254`), `172.16.0.0/12`, `192.168.0.0/16`
-- IPv6: `::/128`, `::1/128`, `fe80::/10`, `fc00::/7`
 
-Customer `protectedIpRanges` accept an IPv4 host or `/8`, `/16`, `/24`, `/32`, and an IPv6 host or `/16`, `/32`, `/48`, `/64`, `/80`, `/96`, `/112`, `/128`. Other prefix lengths fail closed before any `Would block IP:` line, including `/12`, `/10`, `/7`, and `/40`. A single address matches that host only.
+Customer `protectedIpRanges` accept an IPv4 host or `/8`, `/16`, `/24`, `/32`. Other prefix lengths fail closed before any `Would block IP:` line, including `/12`, `/10`, and `/40`. A single address matches that host only. Any other entry fails closed.
 
-Incident values are single hosts. Empty text, whitespace, commas, slashes, and zone ids are rejected and are not repaired. IPv4-mapped IPv6 is rejected and is not converted. Compressed or uppercase incident IPv6 is stored as eight lowercase groups. The block list stores that observed host, not its `/64`.
-
-## Application Gateway and IPv6
-
-Azure Application Gateway does not support IPv6 as an IP block source. Custom-rule IPMatch on `RemoteAddr` is IPv4-only. A validated IPv6 address is returned in `unenforced_addresses`. It is not added to `matchValues`, it is not counted toward `maximumBlockEntries`, and the comment does not say `Would block IP:` or `Blocked IP:` for it. When the incident has no enforceable IPv4 address, the workload does not GET the policy. A mixed incident updates IPv4 only and still records the IPv6 sentence.
-
-Front Door writes the canonical IPv6 address in `matchValue` and counts it toward capacity.
-
-`overrideProtectedRanges` does not change this. Application Gateway still cannot block an IPv6 source.
+Incident values are single hosts. Empty text, whitespace, commas, slashes, zone ids, and any text that is not a canonical dotted IPv4 address are rejected with `invalid IPv4` or `empty, CIDR, or whitespace`. They are not repaired, not added to `matchValues` or `matchValue`, and not counted toward `maximumBlockEntries`. The comment lists them under rejected addresses and does not say `Would block IP:` or `Blocked IP:` for them. When the incident has no IPv4 address, the workload does not GET the policy. A mixed incident updates the IPv4 addresses and still records the rejection.
 
 ## Opaque match values and PUT bodies
 
-Values already stored on the named rule are copied in order as exact strings. They are not lowercased or expanded. A compressed IPv6 value already on a Front Door rule is not the same entry as the expanded form, so the expanded candidate is appended.
-
-An IPv6 value already stored on an Application Gateway rule is copied back unchanged. It still counts toward `maximumBlockEntries`. The following PUT can fail because that provider cannot use IPv6 as a block source. The failure is reported. The stored value is not deleted to make the PUT succeed.
+Values already stored on the named rule are copied in order as exact strings. They are not parsed or rewritten. A stored string still counts toward `maximumBlockEntries`. The workload does not delete that stored value to make the PUT succeed. The failure, if the provider rejects it, is reported.
 
 Application Gateway PUT sends `location`, `tags`, `properties.policySettings`, `properties.customRules`, and `properties.managedRules`. It does not send `sku`, `id`, `etag`, or read-only links. The match condition uses the ARM spelling `negationConditon`. API `2024-05-01` rejects `negationCondition`.
 
@@ -128,7 +121,7 @@ The named rule is rebuilt and placed first. Every other custom rule object is co
 
 ## `overrideProtectedRanges`
 
-JSON `true` skips built-in and customer membership checks. These addresses can then be written to the WAF rule: loopback, RFC1918, link-local, CGNAT, the Azure metadata address, and customer ranges. Invalid addresses and IPv4-mapped IPv6 are still rejected. A malformed `protectedIpRanges` entry still fails closed. Application Gateway still does not gain IPv6 enforcement.
+JSON `true` skips built-in and customer membership checks. These addresses can then be written to the WAF rule: loopback, RFC1918, link-local, CGNAT, the Azure metadata address, and customer ranges. Invalid addresses are still rejected. A malformed `protectedIpRanges` entry still fails closed.
 
 ## Rollback
 

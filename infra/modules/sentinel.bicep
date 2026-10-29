@@ -101,7 +101,7 @@ resource allowlist 'Microsoft.SecurityInsights/watchlists@2024-01-01-preview' = 
   properties: {
     displayName: 'ASE WAF protected IP ranges'
     watchlistAlias: watchlistAlias
-    description: 'Built-in ranges plus the customer protectedIpRanges parameter. The analytics rule also hard-codes the built-in ranges, so editing this watchlist cannot remove loopback, RFC1918, link-local, CGNAT, the Azure metadata address, or the IPv6 unspecified, loopback, link-local, and unique-local ranges unless overrideProtectedRanges is true.'
+    description: 'Built-in ranges plus the customer protectedIpRanges parameter. The analytics rule also hard-codes the built-in ranges, so editing this watchlist cannot remove loopback, RFC1918, link-local, CGNAT, or the Azure metadata address unless overrideProtectedRanges is true.'
     source: 'Local file'
     provider: 'ASE POC'
     itemsSearchKey: 'IPAddress'
