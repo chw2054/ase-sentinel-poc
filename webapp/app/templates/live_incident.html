@@ -21,7 +21,7 @@
 <form method="post" action="/incidents/{{ incident.id }}/dismiss" onsubmit="return confirm('Close this incident without changing the WAF?');">
   <button>Don't block</button>
 </form>
-<p>Block calls the existing function, which updates SentinelAutoBlock and posts the Teams card. Don't block writes an incident comment and closes it. Neither action uses SQL.</p>
+<p>Block calls the existing function, which updates SentinelAutoBlock and posts the Teams card. Don't block writes an incident comment and closes it.</p>
 {% else %}
 <p>This sign-in can view the incident. An operator decides Block or Don't block.</p>
 {% endif %}
