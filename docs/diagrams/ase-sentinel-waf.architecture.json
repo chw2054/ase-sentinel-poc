@@ -1,0 +1,173 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "ASE Sentinel WAF block",
+    "subtitle": "Application Gateway test rig. autoBlockEnabled defaults to true.",
+    "output": "docs/diagrams/ase-sentinel-waf.architecture.html",
+    "visual_preset": "blueprint",
+    "animation": "none",
+    "quality_profile": "showcase",
+    "repository": {
+      "url": "https://github.com/chw2054/ase-sentinel-poc",
+      "revision": "bfa302ccd02b3df1d420afdde70d996cc6c477b0"
+    },
+    "views": [
+      {
+        "id": "probe",
+        "label": "Probe and WAF log",
+        "focus": ["probe", "appgw", "logs"],
+        "note": "The simulated GET is blocked and written to AGWFirewallLogs."
+      },
+      {
+        "id": "detect",
+        "label": "Detect and open incident",
+        "focus": ["logs", "rule", "incident"],
+        "note": "The scheduled rule groups one incident on the client IP."
+      },
+      {
+        "id": "respond",
+        "label": "Playbook and function",
+        "focus": ["incident", "automation", "playbook", "function", "appgw"],
+        "note": "The thin Logic App posts the IP. The function writes SentinelAutoBlock when auto-block is on."
+      }
+    ]
+  },
+  "layout": {
+    "mode": "grid",
+    "origin": [48, 48],
+    "cols": 4,
+    "gapX": 56,
+    "gapY": 96,
+    "cellW": 180,
+    "cellH": 76
+  },
+  "components": [
+    {
+      "id": "probe",
+      "type": "external",
+      "label": "Probe",
+      "sublabel": "GET ?ase-poc-probe=1",
+      "tag": "test",
+      "col": 0,
+      "row": 0,
+      "sources": [{ "path": "scripts/test.ps1", "label": "test script" }]
+    },
+    {
+      "id": "appgw",
+      "type": "security",
+      "label": "Application Gateway",
+      "sublabel": "WAF_v2 Prevention",
+      "tag": "test rig",
+      "col": 1,
+      "row": 0,
+      "sources": [{ "path": "infra/modules/waf.bicep", "label": "WAF module" }]
+    },
+    {
+      "id": "logs",
+      "type": "database",
+      "label": "Log Analytics",
+      "sublabel": "AGWFirewallLogs",
+      "tag": "Dedicated",
+      "col": 2,
+      "row": 0,
+      "sources": [{ "path": "infra/modules/log-analytics.bicep", "label": "workspace" }]
+    },
+    {
+      "id": "rule",
+      "type": "cloud",
+      "label": "Analytics rule",
+      "sublabel": "simulated WAF probe",
+      "tag": "Sentinel",
+      "col": 3,
+      "row": 0,
+      "sources": [{ "path": "sentinel/analytics-rules/simulated-probe.application-gateway.kql", "label": "KQL" }]
+    },
+    {
+      "id": "incident",
+      "type": "cloud",
+      "label": "Sentinel incident",
+      "sublabel": "grouped by IP",
+      "tag": "Sentinel",
+      "col": 3,
+      "row": 1,
+      "sources": [{ "path": "infra/modules/sentinel.bicep", "label": "Sentinel module" }]
+    },
+    {
+      "id": "automation",
+      "type": "cloud",
+      "label": "Automation rule",
+      "sublabel": "on incident Created",
+      "tag": "Sentinel",
+      "col": 2,
+      "row": 1,
+      "sources": [{ "path": "sentinel/automation-rules/block-malicious-ip.bicep", "label": "automation rule" }]
+    },
+    {
+      "id": "playbook",
+      "type": "backend",
+      "label": "Thin Logic App",
+      "sublabel": "incident trigger",
+      "tag": "playbook",
+      "col": 1,
+      "row": 1,
+      "sources": [{ "path": "playbooks/block-malicious-ip/thin-workflow.json", "label": "deployed playbook" }]
+    },
+    {
+      "id": "function",
+      "type": "backend",
+      "label": "Python function",
+      "sublabel": "SentinelWafAutoBlock",
+      "tag": "decision",
+      "col": 0,
+      "row": 1,
+      "sources": [{ "path": "function-app/function_app.py", "label": "function app" }]
+    }
+  ],
+  "boundaries": [
+    {
+      "kind": "region",
+      "label": "rg-ase-sentinel-poc / East US",
+      "wraps": ["appgw", "logs", "rule", "incident", "automation", "playbook", "function"]
+    }
+  ],
+  "connections": [
+    { "from": "probe", "to": "appgw", "label": "HTTP", "variant": "emphasis" },
+    { "from": "appgw", "to": "logs", "label": "firewall log", "variant": "emphasis" },
+    { "from": "logs", "to": "rule", "label": "KQL", "variant": "emphasis" },
+    { "from": "rule", "to": "incident", "label": "IP entity", "variant": "emphasis", "labelDy": 24 },
+    { "from": "incident", "to": "automation", "label": "Created", "variant": "emphasis" },
+    { "from": "automation", "to": "playbook", "label": "start", "variant": "emphasis" },
+    { "from": "playbook", "to": "function", "label": "POST", "variant": "emphasis" },
+    { "from": "function", "to": "appgw", "label": "PUT block", "variant": "security" }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "Deployed path",
+      "items": [
+        "Application Gateway is the test rig",
+        "The thin Logic App only posts the incident IP",
+        "Front Door is not created by this repo"
+      ]
+    },
+    {
+      "dot": "amber",
+      "title": "Block default",
+      "items": [
+        "autoBlockEnabled defaults to true",
+        "The function writes SentinelAutoBlock",
+        "Pass false at deploy time for a dry-run comment"
+      ]
+    },
+    {
+      "dot": "emerald",
+      "title": "Safety",
+      "items": [
+        "Protected ranges are refused",
+        "There is no automatic unblock",
+        "The analytics rule ignores SentinelAutoBlock"
+      ]
+    }
+  ]
+}
