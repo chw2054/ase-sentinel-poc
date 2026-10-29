@@ -19,8 +19,7 @@ def _workflow() -> dict:
 
 def test_thin_playbook_forwards_one_post() -> None:
     workflow = _workflow()
-    actions = workflow["actions"]
-    call = actions["Check_function_url"]["else"]["actions"]["Call_block_function"]
+    call = _find(workflow["actions"], "Call_block_function")
     assert workflow["triggers"]["Microsoft_Sentinel_incident"]["inputs"]["path"] == "/incident-creation"
     assert call["inputs"]["method"] == "POST"
     assert call["inputs"]["uri"] == "@parameters('functionUrl')"
@@ -28,9 +27,43 @@ def test_thin_playbook_forwards_one_post() -> None:
     assert call["inputs"]["retryPolicy"]["type"] == "none"
     assert call["limit"]["timeout"] == "PT2M"
     assert call["inputs"]["body"]["ipEntities"] == "@body('Select_IP_addresses')"
-    select = actions["Select_IP_addresses"]["inputs"]
+    assert call["inputs"]["body"]["execution"] == "dry-run"
+    select = workflow["actions"]["Select_IP_addresses"]["inputs"]
     assert select["from"] == "@coalesce(body('Entities_-_Get_IPs')?['IPs'], json('[]'))"
     assert select["select"] == "@coalesce(item()?['Address'], '')"
+
+
+def _find(node: object, name: str) -> dict:
+    if isinstance(node, dict):
+        if name in node and isinstance(node[name], dict) and "runAfter" in node.get(name, {}):
+            return node[name]
+        for value in node.values():
+            found = _find(value, name)
+            if found is not None:
+                return found
+    return None
+
+
+def test_approval_flow_is_fail_closed() -> None:
+    workflow = _workflow()
+    approval = _find(workflow["actions"], "Start_and_wait_for_an_approval")
+    assert approval["inputs"]["path"] == "/approvalmail/$approved"
+    assert approval["inputs"]["body"]["assignedTo"] == "@parameters('approverEmail')"
+    options = approval["inputs"]["body"]["approvalOptions"]
+    assert options["type"] == "ApproveReject"
+    assert options["expectedResponse"] == "ApproveReject"
+    assert options["notifications"]["default"]["notificationFlow"] is True
+
+    enforce = _find(workflow["actions"], "Call_block_function_-_enforce")
+    assert enforce["inputs"]["body"]["execution"] == "enforce"
+
+    empty = _find(workflow["actions"], "Check_approver")
+    assert "approver email is empty" in json.dumps(empty)
+    approve_branch = json.dumps(_find(workflow["actions"], "Decision")["else"])
+    assert "The approver did not choose Approve" in approve_branch
+    assert "The WAF policy was not changed" in approve_branch
+    failed = json.dumps(_find(workflow["actions"], "Add_comment_-_approval_failed"))
+    assert "The WAF policy was not changed" in failed
 
 
 def test_thin_playbook_does_not_decide_or_write_the_policy() -> None:
@@ -50,6 +83,8 @@ def test_bicep_deploys_the_function_and_keeps_the_logic_app_thin() -> None:
     main = MAIN.read_text(encoding="utf-8")
     assert "thin-workflow.json" in playbook
     assert "role-waf-policy.bicep" not in playbook
+    assert "office365" in playbook
+    assert "approverEmail" in playbook
     assert "modules/function.bicep" in main
     assert "AUTO_BLOCK_ENABLED" in function
     assert "autoBlockEnabled ? 'true' : 'false'" in function

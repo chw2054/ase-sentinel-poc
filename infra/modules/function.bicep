@@ -34,6 +34,9 @@ param blockRulePriority int
 
 param armApiVersion string
 
+@description('Comma-separated Teams notification events the function sends. Default would_block,blocked,put_failed,capacity.')
+param notifyEvents string = 'would_block,blocked,put_failed,capacity'
+
 @description('Sentinel Log Analytics workspace that stores Application Insights telemetry for this function.')
 param logAnalyticsWorkspaceId string
 
@@ -218,6 +221,10 @@ resource functionApp 'Microsoft.Web/sites@2024-04-01' = {
         {
           name: 'ARM_API_VERSION'
           value: armApiVersion
+        }
+        {
+          name: 'NOTIFY_EVENTS'
+          value: notifyEvents
         }
       ]
     }

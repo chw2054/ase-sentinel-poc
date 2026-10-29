@@ -14,9 +14,13 @@ param functionKey string
 @description('Workspace resource id for playbook runtime logs.')
 param logAnalyticsWorkspaceId string
 
+@description('Approver for the Teams/email approval card. Empty stops the playbook before evaluation, fail-closed.')
+param approverEmail string
+
 param tags object
 
 var connectionName = 'azuresentinel-${playbookName}'
+var o365ConnectionName = 'office365-${playbookName}'
 var sentinelResponderRoleId = '3e150937-b8fe-4cfb-8069-0eaf05ecd056'
 
 resource sentinelConnection 'Microsoft.Web/connections@2016-06-01' = {
@@ -33,6 +37,23 @@ resource sentinelConnection 'Microsoft.Web/connections@2016-06-01' = {
     // Alternative plus ManagedServiceIdentity on the workflow is the managed-identity
     // Sentinel connection. No user OAuth secret is stored.
     parameterValueType: 'Alternative'
+  }
+}
+
+resource office365Connection 'Microsoft.Web/connections@2016-06-01' = {
+  name: o365ConnectionName
+  location: location
+  kind: 'V1'
+  tags: tags
+  properties: {
+    displayName: o365ConnectionName
+    api: {
+      id: subscriptionResourceId('Microsoft.Web/locations/managedApis', location, 'office365')
+    }
+    // The office365 connector does not accept a managed identity and rejects
+    // parameterValueType 'Alternative'. An operator must open this connection
+    // in the portal once and choose Authorize with the approver's account
+    // before the approval card can be delivered.
   }
 }
 
@@ -59,6 +80,11 @@ resource playbook 'Microsoft.Logic/workflows@2019-05-01' = {
               }
             }
           }
+          office365: {
+            connectionId: office365Connection.id
+            connectionName: office365Connection.name
+            id: subscriptionResourceId('Microsoft.Web/locations/managedApis', location, 'office365')
+          }
         }
       }
       functionUrl: {
@@ -66,6 +92,9 @@ resource playbook 'Microsoft.Logic/workflows@2019-05-01' = {
       }
       functionKey: {
         value: functionKey
+      }
+      approverEmail: {
+        value: approverEmail
       }
     }
   }

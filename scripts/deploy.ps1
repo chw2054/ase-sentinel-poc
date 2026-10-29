@@ -15,6 +15,13 @@ param(
     [bool] $DeployTestWaf = $true,
     [string] $ExistingWafPolicyName = '',
     [string] $ExistingWafPolicyResourceId = '',
+    [ValidatePattern('^https://')]
+    [string] $NotifyTeamsUrl = '',
+    [ValidatePattern('^[a-z_,]*$')]
+    [string] $NotifyEvents = 'blocked,put_failed,capacity',
+    # The playbook stops fail-closed when this is empty: no approver, no block.
+    [ValidatePattern('^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$')]
+    [string] $ApproverEmail = '',
     [ValidateSet('AzureDiagnostics', 'ResourceSpecific')]
     [string] $FrontDoorLogDestination = 'AzureDiagnostics',
     [ValidateSet('Prevention', 'Detection')]
@@ -223,6 +230,8 @@ function Set-PlaybookFunctionBinding {
         [Parameter(Mandatory)]
         [string] $WorkspaceResourceId,
         [Parameter(Mandatory)]
+        [string] $ApproverEmail,
+        [Parameter(Mandatory)]
         [string] $TemplateFile
     )
     $parameterFile = Join-Path ([System.IO.Path]::GetTempPath()) ("ase-sentinel-poc-bind-{0}.json" -f [guid]::NewGuid().ToString('n'))
@@ -234,6 +243,7 @@ function Set-PlaybookFunctionBinding {
             playbookName = @{ value = $PlaybookName }
             functionUrl = @{ value = $FunctionUrl }
             functionKey = @{ value = $FunctionKey }
+            approverEmail = @{ value = $ApproverEmail }
             logAnalyticsWorkspaceId = @{ value = $WorkspaceResourceId }
             tags = @{
                 value = @{
@@ -442,6 +452,20 @@ if ($SubscriptionId) {
 }
 Invoke-AzCli @('account', 'show', '--output', 'none')
 
+# Bicep owns the app settings list, so a main deployment resets every setting
+# that is not in the template. Capture the Teams notifier URL first so it can
+# be restored after the deployment when -NotifyTeamsUrl is not passed.
+$preservedNotifyUrl = ''
+if (-not $WhatIf) {
+    $prevFn = az deployment group show --name 'ase-sentinel-poc-main' --resource-group $ResourceGroupName --query 'properties.outputs.functionAppName.value' --output tsv 2>$null
+    if ($LASTEXITCODE -eq 0 -and -not [string]::IsNullOrWhiteSpace($prevFn)) {
+        $captured = az functionapp config appsettings list --resource-group $ResourceGroupName --name $prevFn --query "[?name=='NOTIFY_TEAMS_URL'].value" --output tsv 2>$null
+        if ($LASTEXITCODE -eq 0 -and -not [string]::IsNullOrWhiteSpace($captured)) {
+            $preservedNotifyUrl = $captured.Trim()
+        }
+    }
+}
+
 if (-not $AutomationRuleOnly) {
     if ($DeployTestWaf) {
         Write-Warning 'The test Application Gateway uses WAF_v2 and bills hourly until the resource group is deleted.'
@@ -479,6 +503,8 @@ if (-not $AutomationRuleOnly) {
         "probeRulePriority=$ProbeRulePriority",
         "blockRuleName=$BlockRuleName",
         "blockRulePriority=$BlockRulePriority",
+        "notifyEvents=$NotifyEvents",
+        "approverEmail=$ApproverEmail",
         "appGatewayMinCapacity=$AppGatewayMinCapacity",
         "appGatewayMaxCapacity=$AppGatewayMaxCapacity"
     )
@@ -512,6 +538,26 @@ if (-not $AutomationRuleOnly) {
         Write-Host 'Restarting the Function App so the worker loads the corrected JSON settings.'
         Invoke-AzCli @('functionapp', 'restart', '--resource-group', $ResourceGroupName, '--name', $mainOutputs.functionAppName.value)
     }
+    $notifyUrl = $NotifyTeamsUrl
+    if (-not $notifyUrl) {
+        $notifyUrl = $preservedNotifyUrl
+    }
+    if ($notifyUrl) {
+        # The Workflows URL is not a template parameter, so it stays out of the
+        # deployment history. Direct call, not Invoke-AzCli, which echoes the
+        # command line. The new direct/cu triggers require an Entra token, so
+        # NOTIFY_TEAMS_AUTH=entra makes the notifier send the managed identity
+        # token for https://service.flow.microsoft.com/.
+        Write-Host 'Storing the Teams Workflows URL as an app setting. The value is not printed.'
+        & az functionapp config appsettings set `
+            --resource-group $ResourceGroupName `
+            --name $mainOutputs.functionAppName.value `
+            --settings "NOTIFY_TEAMS_URL=$notifyUrl" "NOTIFY_TEAMS_AUTH=entra" `
+            --output none
+        if ($LASTEXITCODE -ne 0) {
+            throw 'Could not set the Teams notifier app settings. Notifications stay silent until they are set.'
+        }
+    }
     $functionKey = Get-BlockFunctionKey -ResourceGroupName $ResourceGroupName -FunctionAppName $mainOutputs.functionAppName.value
     Set-PlaybookFunctionBinding `
         -ResourceGroupName $ResourceGroupName `
@@ -520,6 +566,7 @@ if (-not $AutomationRuleOnly) {
         -FunctionUrl $mainOutputs.functionUrl.value `
         -FunctionKey $functionKey `
         -WorkspaceResourceId $mainOutputs.workspaceResourceId.value `
+        -ApproverEmail $ApproverEmail `
         -TemplateFile (Join-Path $infra 'modules\playbook.bicep')
     Remove-PlaybookNetworkContributor -PolicyId $mainOutputs.wafPolicyId.value -PrincipalId $mainOutputs.playbookPrincipalId.value
 }

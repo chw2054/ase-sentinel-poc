@@ -13,6 +13,10 @@
     "functionKey": {
       "defaultValue": "",
       "type": "SecureString"
+    },
+    "approverEmail": {
+      "defaultValue": "",
+      "type": "String"
     }
   },
   "triggers": {
@@ -131,63 +135,279 @@
       },
       "else": {
         "actions": {
-          "Call_block_function": {
-            "type": "Http",
-            "inputs": {
-              "uri": "@parameters('functionUrl')",
-              "method": "POST",
-              "headers": {
-                "Content-Type": "application/json",
-                "x-functions-key": "@parameters('functionKey')"
+          "Check_approver": {
+            "type": "If",
+            "expression": {
+              "equals": [
+                "@parameters('approverEmail')",
+                ""
+              ]
+            },
+            "actions": {
+              "Add_comment_-_approver_not_set": {
+                "type": "ApiConnection",
+                "inputs": {
+                  "body": {
+                    "incidentArmId": "@triggerBody()?['object']?['id']",
+                    "message": "<p><strong>ASE POC playbook stopped before evaluation.</strong> The approver email is empty, so the approval flow cannot run. The WAF policy was not changed and no block was proposed.</p><p>Logic App run: @{workflow()['run']['name']}</p>"
+                  },
+                  "host": {
+                    "connection": {
+                      "name": "@parameters('$connections')['azuresentinel']['connectionId']"
+                    }
+                  },
+                  "method": "post",
+                  "path": "/Incidents/Comment"
+                },
+                "runAfter": {}
               },
-              "body": {
-                "incidentArmId": "@triggerBody()?['object']?['id']",
-                "incidentNumber": "@triggerBody()?['object']?['properties']?['incidentNumber']",
-                "incidentTitle": "@triggerBody()?['object']?['properties']?['title']",
-                "ipEntities": "@body('Select_IP_addresses')"
-              },
-              "retryPolicy": {
-                "type": "none"
+              "Terminate_-_approver_not_set": {
+                "type": "Terminate",
+                "inputs": {
+                  "runStatus": "Succeeded"
+                },
+                "runAfter": {
+                  "Add_comment_-_approver_not_set": [
+                    "Succeeded"
+                  ]
+                }
               }
             },
-            "limit": {
-              "timeout": "PT2M"
-            },
-            "operationOptions": "DisableAsyncPattern",
-            "runAfter": {}
-          },
-          "Add_comment_-_function_call_failed": {
-            "type": "ApiConnection",
-            "inputs": {
-              "body": {
-                "incidentArmId": "@triggerBody()?['object']?['id']",
-                "message": "<p><strong>ASE POC playbook could not complete the Python workload call.</strong> Do not assume the WAF policy was changed. Read the policy and the Function App logs before retrying.</p><p>Logic App run: @{workflow()['run']['name']}</p>"
-              },
-              "host": {
-                "connection": {
-                  "name": "@parameters('$connections')['azuresentinel']['connectionId']"
+            "else": {
+              "actions": {
+                "Call_block_function": {
+                  "type": "Http",
+                  "inputs": {
+                    "uri": "@parameters('functionUrl')",
+                    "method": "POST",
+                    "headers": {
+                      "Content-Type": "application/json",
+                      "x-functions-key": "@parameters('functionKey')"
+                    },
+                    "body": {
+                      "incidentArmId": "@triggerBody()?['object']?['id']",
+                      "incidentNumber": "@triggerBody()?['object']?['properties']?['incidentNumber']",
+                      "incidentTitle": "@triggerBody()?['object']?['properties']?['title']",
+                      "ipEntities": "@body('Select_IP_addresses')",
+                      "execution": "dry-run"
+                    },
+                    "retryPolicy": {
+                      "type": "none"
+                    }
+                  },
+                  "limit": {
+                    "timeout": "PT2M"
+                  },
+                  "operationOptions": "DisableAsyncPattern",
+                  "runAfter": {}
+                },
+                "Add_comment_-_function_call_failed": {
+                  "type": "ApiConnection",
+                  "inputs": {
+                    "body": {
+                      "incidentArmId": "@triggerBody()?['object']?['id']",
+                      "message": "<p><strong>ASE POC playbook could not complete the Python workload call.</strong> Do not assume the WAF policy was changed. Read the policy and the Function App logs before retrying.</p><p>Logic App run: @{workflow()['run']['name']}</p>"
+                    },
+                    "host": {
+                      "connection": {
+                        "name": "@parameters('$connections')['azuresentinel']['connectionId']"
+                      }
+                    },
+                    "method": "post",
+                    "path": "/Incidents/Comment"
+                  },
+                  "runAfter": {
+                    "Call_block_function": [
+                      "Failed",
+                      "TimedOut"
+                    ]
+                  }
+                },
+                "Terminate_-_function_call_failed": {
+                  "type": "Terminate",
+                  "inputs": {
+                    "runStatus": "Succeeded"
+                  },
+                  "runAfter": {
+                    "Add_comment_-_function_call_failed": [
+                      "Succeeded"
+                    ]
+                  }
+                },
+                "Has_candidates": {
+                  "type": "If",
+                  "expression": {
+                    "and": [
+                      {
+                        "equals": [
+                          "@body('Call_block_function')?['status']",
+                          "dry-run"
+                        ]
+                      },
+                      {
+                        "greater": [
+                          "@length(coalesce(body('Call_block_function')?['new_addresses'], json('[]')))",
+                          0
+                        ]
+                      }
+                    ]
+                  },
+                  "actions": {
+                    "Start_and_wait_for_an_approval": {
+                      "type": "ApiConnection",
+                      "inputs": {
+                        "body": {
+                          "assignedTo": "@parameters('approverEmail')",
+                          "approvalOptions": {
+                            "type": "ApproveReject",
+                            "expectedResponse": "ApproveReject",
+                            "title": "ASE POC: approve WAF block for incident @{coalesce(triggerBody()?['object']?['properties']?['incidentNumber'], '')}: @{join(coalesce(body('Call_block_function')?['new_addresses'], json('[]')), ', ')}",
+                            "notifications": {
+                              "default": {
+                                "notificationType": "ApprovalEmail",
+                                "notificationFlow": true
+                              }
+                            }
+                          }
+                        },
+                        "host": {
+                          "connection": {
+                            "name": "@parameters('$connections')['office365']['connectionId']"
+                          }
+                        },
+                        "method": "post",
+                        "path": "/approvalmail/$approved"
+                      },
+                      "runAfter": {}
+                    },
+                    "Add_comment_-_approval_failed": {
+                      "type": "ApiConnection",
+                      "inputs": {
+                        "body": {
+                          "incidentArmId": "@triggerBody()?['object']?['id']",
+                          "message": "<p><strong>ASE POC playbook did not receive an approval.</strong> The approval request failed or was not answered before the deadline. The WAF policy was not changed.</p><p>Logic App run: @{workflow()['run']['name']}</p>"
+                        },
+                        "host": {
+                          "connection": {
+                            "name": "@parameters('$connections')['azuresentinel']['connectionId']"
+                          }
+                        },
+                        "method": "post",
+                        "path": "/Incidents/Comment"
+                      },
+                      "runAfter": {
+                        "Start_and_wait_for_an_approval": [
+                          "Failed",
+                          "TimedOut"
+                        ]
+                      }
+                    },
+                    "Terminate_-_approval_failed": {
+                      "type": "Terminate",
+                      "inputs": {
+                        "runStatus": "Succeeded"
+                      },
+                      "runAfter": {
+                        "Add_comment_-_approval_failed": [
+                          "Succeeded"
+                        ]
+                      }
+                    },
+                    "Decision": {
+                      "type": "If",
+                      "expression": {
+                        "equals": [
+                          "@toLower(coalesce(body('Start_and_wait_for_an_approval')?['response'], ''))",
+                          "approve"
+                        ]
+                      },
+                      "actions": {
+                        "Call_block_function_-_enforce": {
+                          "type": "Http",
+                          "inputs": {
+                            "uri": "@parameters('functionUrl')",
+                            "method": "POST",
+                            "headers": {
+                              "Content-Type": "application/json",
+                              "x-functions-key": "@parameters('functionKey')"
+                            },
+                            "body": {
+                              "incidentArmId": "@triggerBody()?['object']?['id']",
+                              "incidentNumber": "@triggerBody()?['object']?['properties']?['incidentNumber']",
+                              "incidentTitle": "@triggerBody()?['object']?['properties']?['title']",
+                              "ipEntities": "@body('Select_IP_addresses')",
+                              "execution": "enforce"
+                            },
+                            "retryPolicy": {
+                              "type": "none"
+                            }
+                          },
+                          "limit": {
+                            "timeout": "PT2M"
+                          },
+                          "operationOptions": "DisableAsyncPattern",
+                          "runAfter": {}
+                        },
+                        "Add_comment_-_enforce_call_failed": {
+                          "type": "ApiConnection",
+                          "inputs": {
+                            "body": {
+                              "incidentArmId": "@triggerBody()?['object']?['id']",
+                              "message": "<p><strong>ASE POC playbook could not complete the approved block request.</strong> The approval was given, but the second Python workload call failed. Do not assume the WAF policy was changed. Read the policy and the Function App logs before retrying.</p><p>Logic App run: @{workflow()['run']['name']}</p>"
+                            },
+                            "host": {
+                              "connection": {
+                                "name": "@parameters('$connections')['azuresentinel']['connectionId']"
+                              }
+                            },
+                            "method": "post",
+                            "path": "/Incidents/Comment"
+                          },
+                          "runAfter": {
+                            "Call_block_function_-_enforce": [
+                              "Failed",
+                              "TimedOut"
+                            ]
+                          }
+                        }
+                      },
+                      "else": {
+                        "actions": {
+                          "Add_comment_-_not_approved": {
+                            "type": "ApiConnection",
+                            "inputs": {
+                              "body": {
+                                "incidentArmId": "@triggerBody()?['object']?['id']",
+                                "message": "<p><strong>ASE POC playbook did not block.</strong> The approver did not choose Approve. The WAF policy was not changed. The evaluation comment above lists what was proposed.</p><p>Logic App run: @{workflow()['run']['name']}</p>"
+                              },
+                              "host": {
+                                "connection": {
+                                  "name": "@parameters('$connections')['azuresentinel']['connectionId']"
+                                }
+                              },
+                              "method": "post",
+                              "path": "/Incidents/Comment"
+                            },
+                            "runAfter": {}
+                          }
+                        }
+                      },
+                      "runAfter": {
+                        "Start_and_wait_for_an_approval": [
+                          "Succeeded"
+                        ]
+                      }
+                    }
+                  },
+                  "runAfter": {
+                    "Call_block_function": [
+                      "Succeeded"
+                    ]
+                  }
                 }
-              },
-              "method": "post",
-              "path": "/Incidents/Comment"
+              }
             },
-            "runAfter": {
-              "Call_block_function": [
-                "Failed",
-                "TimedOut"
-              ]
-            }
-          },
-          "Terminate_-_function_call_failed": {
-            "type": "Terminate",
-            "inputs": {
-              "runStatus": "Succeeded"
-            },
-            "runAfter": {
-              "Add_comment_-_function_call_failed": [
-                "Succeeded"
-              ]
-            }
+            "runAfter": {}
           }
         }
       },
