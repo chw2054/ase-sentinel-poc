@@ -6,43 +6,46 @@
   "quality_profile": "showcase",
   "text_policy": "strict",
   "width": 1440,
-  "height": 620,
+  "height": 820,
   "title": "ASE Sentinel WAF block POC",
-  "subtitle": "Deployed dry-run. A matching incident comments and does not change the WAF policy.",
+  "subtitle": "Deployed enforcement. A new incident writes the source IP onto SentinelAutoBlock.",
   "containers": [
     { "id": "detect", "x": 40, "y": 108, "width": 1360, "height": 132, "label": "Detection" },
-    { "id": "respond", "x": 40, "y": 328, "width": 1360, "height": 132, "label": "Response" }
+    { "id": "respond", "x": 40, "y": 320, "width": 1360, "height": 132, "label": "Response" },
+    { "id": "telemetry", "x": 752, "y": 532, "width": 290, "height": 132, "label": "Telemetry" }
   ],
   "nodes": [
     { "id": "probe", "kind": "rect", "x": 60, "y": 152, "width": 250, "height": 68, "label": "Probe client", "sublabel": "GET ?ase-poc-probe=1", "fill": "#eff6ff", "stroke": "#3b82f6", "flat": true },
     { "id": "waf", "kind": "double_rect", "x": 416, "y": 152, "width": 250, "height": 68, "label": "Application Gateway", "sublabel": "PocSimulatedProbe blocks", "fill": "#fff7ed", "stroke": "#f97316", "flat": true },
     { "id": "logs", "kind": "cylinder", "x": 772, "y": 152, "width": 250, "height": 68, "label": "Log Analytics", "sublabel": "AGWFirewallLogs", "fill": "#ecfdf5", "stroke": "#10b981" },
-    { "id": "rule", "kind": "rect", "x": 1128, "y": 152, "width": 250, "height": 68, "label": "Sentinel analytics", "sublabel": "3 events in 30 min", "fill": "#faf5ff", "stroke": "#8b5cf6", "flat": true },
-    { "id": "incident", "kind": "rect", "x": 60, "y": 372, "width": 250, "height": 68, "label": "Sentinel incident", "sublabel": "group by IP, 12 h", "fill": "#fef2f2", "stroke": "#dc2626", "flat": true },
-    { "id": "playbook", "kind": "rect", "x": 416, "y": 372, "width": 250, "height": 68, "label": "Logic App playbook", "sublabel": "incident Created only", "fill": "#faf5ff", "stroke": "#8b5cf6", "flat": true },
-    { "id": "function", "kind": "double_rect", "x": 772, "y": 372, "width": 250, "height": 68, "label": "Python Function", "sublabel": "dry-run, no WAF PUT", "fill": "#eff6ff", "stroke": "#3b82f6", "flat": true },
-    { "id": "comment", "kind": "rect", "x": 1128, "y": 372, "width": 250, "height": 68, "label": "Incident comment", "sublabel": "Would block IP", "fill": "#ecfdf5", "stroke": "#10b981", "flat": true }
+    { "id": "rule", "kind": "rect", "x": 1128, "y": 152, "width": 250, "height": 68, "label": "Sentinel analytics", "sublabel": "3 transactions in 30 min", "fill": "#faf5ff", "stroke": "#8b5cf6", "flat": true },
+    { "id": "incident", "kind": "rect", "x": 60, "y": 364, "width": 250, "height": 68, "label": "Sentinel incident", "sublabel": "group by IP, 12 h", "fill": "#fef2f2", "stroke": "#dc2626", "flat": true },
+    { "id": "playbook", "kind": "rect", "x": 416, "y": 364, "width": 250, "height": 68, "label": "Logic App playbook", "sublabel": "incident Created only", "fill": "#faf5ff", "stroke": "#8b5cf6", "flat": true },
+    { "id": "function", "kind": "double_rect", "x": 772, "y": 364, "width": 250, "height": 68, "label": "Python Function", "sublabel": "AUTO_BLOCK_ENABLED true", "fill": "#eff6ff", "stroke": "#3b82f6", "flat": true },
+    { "id": "policy", "kind": "rect", "x": 1128, "y": 364, "width": 250, "height": 68, "label": "SentinelAutoBlock", "sublabel": "priority 10, PUT the IP", "fill": "#fff7ed", "stroke": "#f97316", "flat": true },
+    { "id": "insights", "kind": "cylinder", "x": 772, "y": 576, "width": 250, "height": 68, "label": "Application Insights", "sublabel": "AppRequests, AppTraces", "fill": "#ecfdf5", "stroke": "#10b981" }
   ],
   "arrows": [
     { "id": "request", "source": "probe", "target": "waf", "source_port": "right", "target_port": "left", "flow": "control", "label": "HTTP" },
     { "id": "diag", "source": "waf", "target": "logs", "source_port": "right", "target_port": "left", "flow": "data", "label": "Dedicated" },
     { "id": "query", "source": "logs", "target": "rule", "source_port": "right", "target_port": "left", "flow": "data", "label": "KQL" },
-    { "id": "open", "source": "rule", "target": "incident", "source_port": "bottom", "target_port": "top", "flow": "control", "label": "IP entity", "route_points": [[1253, 284], [185, 284]] },
+    { "id": "open", "source": "rule", "target": "incident", "source_port": "bottom", "target_port": "top", "flow": "control", "label": "IP entity", "route_points": [[1253, 280], [185, 280]] },
     { "id": "trigger", "source": "incident", "target": "playbook", "source_port": "right", "target_port": "left", "flow": "neutral", "label": "Created" },
     { "id": "post", "source": "playbook", "target": "function", "source_port": "right", "target_port": "left", "flow": "control", "label": "POST" },
-    { "id": "note", "source": "function", "target": "comment", "source_port": "right", "target_port": "left", "flow": "write", "label": "comment" }
+    { "id": "put", "source": "function", "target": "policy", "source_port": "right", "target_port": "left", "flow": "write", "label": "PUT" },
+    { "id": "traces", "source": "function", "target": "insights", "source_port": "bottom", "target_port": "top", "flow": "data", "label": "traces" }
   ],
   "legend_orientation": "horizontal",
   "legend_x": 48,
-  "legend_y": 496,
+  "legend_y": 708,
   "legend_locked": true,
   "legend": [
     { "flow": "control", "label": "request" },
     { "flow": "data", "label": "log" },
     { "flow": "neutral", "label": "automation" },
-    { "flow": "write", "label": "dry-run comment" }
+    { "flow": "write", "label": "block write" }
   ],
-  "footer": "Style 1 Flat Icon · eastus · rg-ase-sentinel-poc · autoBlockEnabled false",
+  "footer": "Style 1 Flat Icon · eastus · rg-ase-sentinel-poc · appi-ase-sentinel-poc · AUTO_BLOCK_ENABLED true",
   "footer_x": 48,
-  "footer_y": 572
+  "footer_y": 772
 }

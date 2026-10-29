@@ -1,6 +1,6 @@
 {
   "canvas": {
-    "height": 620.0,
+    "height": 820.0,
     "width": 1440.0
   },
   "composition": {
@@ -20,7 +20,7 @@
       "max_route_stretch": 1.0,
       "minimum_container_gutter": 20.0,
       "minimum_node_gap": 106.0,
-      "shortest_segment": 64.0,
+      "shortest_segment": 60.0,
       "total_bends": 2
     },
     "ok": true,
@@ -121,7 +121,7 @@
       "bridges": [],
       "crossings": [],
       "id": "open",
-      "length": 1220.0,
+      "length": 1212.0,
       "route": [
         [
           1253.0,
@@ -129,15 +129,15 @@
         ],
         [
           1253.0,
-          284.0
+          280.0
         ],
         [
           185.0,
-          284.0
+          280.0
         ],
         [
           185.0,
-          372.0
+          364.0
         ]
       ],
       "route_stretch": 1.0,
@@ -149,16 +149,16 @@
       "target": "incident",
       "target_port": [
         185.0,
-        372.0
+        364.0
       ],
       "waypoints": [
         [
           1253.0,
-          284.0
+          280.0
         ],
         [
           185.0,
-          284.0
+          280.0
         ]
       ]
     },
@@ -171,23 +171,23 @@
       "route": [
         [
           310.0,
-          406.0
+          398.0
         ],
         [
           416.0,
-          406.0
+          398.0
         ]
       ],
       "route_stretch": 1.0,
       "source": "incident",
       "source_port": [
         310.0,
-        406.0
+        398.0
       ],
       "target": "playbook",
       "target_port": [
         416.0,
-        406.0
+        398.0
       ],
       "waypoints": []
     },
@@ -200,23 +200,23 @@
       "route": [
         [
           666.0,
-          406.0
+          398.0
         ],
         [
           772.0,
-          406.0
+          398.0
         ]
       ],
       "route_stretch": 1.0,
       "source": "playbook",
       "source_port": [
         666.0,
-        406.0
+        398.0
       ],
       "target": "function",
       "target_port": [
         772.0,
-        406.0
+        398.0
       ],
       "waypoints": []
     },
@@ -224,28 +224,57 @@
       "bends": 0,
       "bridges": [],
       "crossings": [],
-      "id": "note",
+      "id": "put",
       "length": 106.0,
       "route": [
         [
           1022.0,
-          406.0
+          398.0
         ],
         [
           1128.0,
-          406.0
+          398.0
         ]
       ],
       "route_stretch": 1.0,
       "source": "function",
       "source_port": [
         1022.0,
-        406.0
+        398.0
       ],
-      "target": "comment",
+      "target": "policy",
       "target_port": [
         1128.0,
-        406.0
+        398.0
+      ],
+      "waypoints": []
+    },
+    {
+      "bends": 0,
+      "bridges": [],
+      "crossings": [],
+      "id": "traces",
+      "length": 144.0,
+      "route": [
+        [
+          897.0,
+          432.0
+        ],
+        [
+          897.0,
+          576.0
+        ]
+      ],
+      "route_stretch": 1.0,
+      "source": "function",
+      "source_port": [
+        897.0,
+        432.0
+      ],
+      "target": "insights",
+      "target_port": [
+        897.0,
+        576.0
       ],
       "waypoints": []
     }
@@ -270,18 +299,18 @@
     "legend": {
       "actual": [
         48.0,
-        496.0
+        708.0
       ],
       "bounds": [
         38.0,
-        482.0,
-        546.96,
-        528.0
+        694.0,
+        512.88,
+        740.0
       ],
       "moved": false,
       "requested": [
         48.0,
-        496.0
+        708.0
       ]
     }
   },
@@ -299,8 +328,8 @@
   },
   "summary": {
     "bridged_crossings": 0,
-    "edges": 7,
-    "nodes": 8
+    "edges": 8,
+    "nodes": 9
   },
   "text_metrics": "heuristic-v1",
   "typography": {
