@@ -1,0 +1,42 @@
+{% extends "base.html" %}
+{% block body %}
+<h1>Block list</h1>
+<p class="banner">Entries are the local fixture plus anything this app writes. Live Azure was not contacted. Product cap {{ cap }}. Platform IPMatch cap is 600 per rule on CRS 3.2.</p>
+{% if preview %}
+<section class="panel">
+  <h2>Preview</h2>
+  <p>Before {{ preview.before }}</p>
+  <p>After {{ preview.after }}</p>
+  <p>Remaining product capacity {{ preview.remaining }}.</p>
+  <form method="post" action="/blocks">
+    <input type="hidden" name="cidr" value="{{ cidr }}">
+    <input type="hidden" name="reason" value="{{ reason }}">
+    <button>Apply</button>
+  </form>
+</section>
+{% endif %}
+<form method="get"><input name="q" value="{{ q }}" placeholder="Search"><button>Search</button></form>
+<form method="post" action="/blocks/preview" class="panel">
+  <label>IP or CIDR<br><input name="cidr" required></label>
+  <label>Reason<br><input name="reason"></label>
+  <button>Preview</button>
+</form>
+<table>
+  <tr><th>Entry</th><th>Ownership</th><th>Reason</th><th>Incident</th><th></th></tr>
+  {% for row in rows %}
+  <tr>
+    <td>{{ row.cidr }}</td>
+    <td>{{ row.ownership }}</td>
+    <td>{{ row.reason }}</td>
+    <td>{{ row.incident_id }}</td>
+    <td>
+      <form method="post" action="/blocks/{{ row.id }}/remove">
+        <input name="host" placeholder="Host inside a CIDR">
+        <label><input type="checkbox" name="split_external" value="yes"> Split external CIDR</label>
+        <button>Remove</button>
+      </form>
+    </td>
+  </tr>
+  {% endfor %}
+</table>
+{% endblock %}

@@ -1,0 +1,19 @@
+:root {
+  color: #1c1917;
+  background: #f6f4ef;
+  font-family: "Segoe UI", sans-serif;
+}
+body { margin: 0; }
+header, main { padding: 1rem 1.5rem; }
+header { background: #1f2933; color: white; display: flex; justify-content: space-between; gap: 1rem; }
+header a { color: white; margin-right: 0.8rem; }
+main { max-width: 980px; }
+.cards { display: flex; gap: 1rem; flex-wrap: wrap; }
+.card, table, form.panel { background: white; border: 1px solid #ddd; padding: 0.8rem 1rem; }
+table { width: 100%; border-collapse: collapse; }
+td, th { text-align: left; padding: 0.35rem; border-bottom: 1px solid #eee; vertical-align: top; }
+.banner { background: #fff7ed; border: 1px solid #fdba74; padding: 0.6rem 0.8rem; }
+.error { background: #fef2f2; border: 1px solid #fca5a5; padding: 0.6rem 0.8rem; }
+.ok { background: #ecfdf5; border: 1px solid #6ee7b7; padding: 0.6rem 0.8rem; }
+button, input, select { font: inherit; }
+button { margin-right: 0.4rem; }

@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+{% block body %}
+<p class="banner">Local fixture. This process has not read or written the live WAF policy.</p>
+<section class="cards">
+  <div class="card"><strong>{{ pending }}</strong><div>Pending approvals</div></div>
+  <div class="card"><strong>{{ incidents }}</strong><div>Incidents in this app</div></div>
+  <div class="card"><strong>{{ blocks }}</strong> / {{ cap }}<div>Active block entries</div></div>
+</section>
+<h2>Recent incidents</h2>
+<table>
+  <tr><th>Number</th><th>Title</th><th>IP</th><th>Processing</th></tr>
+  {% for row in recent %}
+  <tr>
+    <td><a href="/incidents/{{ row.id }}">{{ row.incident_number }}</a></td>
+    <td>{{ row.title }}</td>
+    <td>{{ row.ip_address }}</td>
+    <td>{{ row.processing_status }}</td>
+  </tr>
+  {% else %}
+  <tr><td colspan="4">No incidents yet.</td></tr>
+  {% endfor %}
+</table>
+{% endblock %}

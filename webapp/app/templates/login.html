@@ -1,0 +1,14 @@
+{% extends "base.html" %}
+{% block body %}
+<h1>Sign in</h1>
+<p>Local accounts share the dev password. Production uses Entra ID and disables this form.</p>
+<form method="post" action="/login" class="panel">
+  <label>User<br>
+    <select name="email">
+      {% for user in users %}<option>{{ user }}</option>{% endfor %}
+    </select>
+  </label>
+  <label>Password<br><input name="password" type="password" required></label>
+  <button>Sign in</button>
+</form>
+{% endblock %}

@@ -1,0 +1,12 @@
+{% extends "base.html" %}
+{% block body %}
+<h1>Settings</h1>
+<table>
+  <tr><th>Environment</th><td>{{ settings.app_env }}</td></tr>
+  <tr><th>Require approval before an incident write</th><td>{{ settings.require_approval }}</td></tr>
+  <tr><th>maximumBlockEntries</th><td>{{ settings.product_cap }}</td></tr>
+  <tr><th>Block rule</th><td>{{ settings.block_rule_name }} priority {{ settings.block_rule_priority }}</td></tr>
+  <tr><th>Configuration confirmed</th><td>{{ config.confirmed }} by {{ config.updatedBy }}</td></tr>
+</table>
+<p>Production stores this document in Azure SQL via DATABASE_URL. The SQLite file is only for local development.</p>
+{% endblock %}

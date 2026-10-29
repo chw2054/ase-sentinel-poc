@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>ASE Sentinel operations</title>
+  <link rel="stylesheet" href="/static/app.css">
+</head>
+<body>
+<header>
+  <nav>
+    {% if live %}
+    <a href="/">Incidents</a>
+    <a href="/blocks">Block list</a>
+    {% else %}
+    <a href="/">Dashboard</a>
+    <a href="/incidents">Incidents</a>
+    <a href="/approvals">Approvals</a>
+    <a href="/blocks">Block list</a>
+    <a href="/discovery">Discovery</a>
+    <a href="/settings">Settings</a>
+    <a href="/audit">Audit</a>
+    {% endif %}
+  </nav>
+  <div>
+    {% if principal %}
+      {{ principal.name }}
+      <form method="post" action="/logout" style="display:inline"><button>Sign out</button></form>
+    {% else %}
+      <a href="/login">Sign in</a>
+    {% endif %}
+  </div>
+</header>
+<main>
+  {% if message %}<p class="ok">{{ message }}</p>{% endif %}
+  {% if error %}<p class="error">{{ error }}</p>{% endif %}
+  {% block body %}{% endblock %}
+</main>
+</body>
+</html>

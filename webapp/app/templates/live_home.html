@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+{% block body %}
+<h1>Open incidents</h1>
+<p class="banner">Read from Microsoft Sentinel and the WAF policy. This app does not use SQL. {{ pending }} still need a decision. {{ blocks }} / {{ cap }} addresses are on SentinelAutoBlock.</p>
+{% if load_error %}<p class="error">{{ load_error }}</p>{% endif %}
+<table>
+  <tr><th>Number</th><th>Title</th><th>Severity</th><th>IP</th><th>WAF</th></tr>
+  {% for row in rows %}
+  <tr>
+    <td><a href="/incidents/{{ row.id }}">{{ row.number }}</a></td>
+    <td>{{ row.title }}</td>
+    <td>{{ row.severity }}</td>
+    <td>{{ row.ip or "No IPv4 yet" }}</td>
+    <td>{% if row.on_block_list %}On the block list{% else %}Not blocked{% endif %}</td>
+  </tr>
+  {% else %}
+  <tr><td colspan="5">No open incidents.</td></tr>
+  {% endfor %}
+</table>
+{% endblock %}

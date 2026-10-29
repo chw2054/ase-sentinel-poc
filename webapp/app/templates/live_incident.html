@@ -1,0 +1,28 @@
+{% extends "base.html" %}
+{% block body %}
+{% if load_error %}<p class="error">{{ load_error }}</p>{% endif %}
+{% if incident is none %}
+<p>Incident not found.</p>
+{% else %}
+<h1>Incident {{ incident.number }}</h1>
+<p>{{ incident.title }}</p>
+<p>Severity {{ incident.severity }}. Status {{ incident.status }}. Created {{ incident.created }}.</p>
+<p>Address {{ incident.ips | join(", ") or "none" }}.</p>
+{% if on_block_list %}
+<p class="ok">This address is already on SentinelAutoBlock.</p>
+{% else %}
+<p>This address is not on SentinelAutoBlock.</p>
+{% endif %}
+{% if can_decide %}
+<form method="post" action="/incidents/{{ incident.id }}/block" onsubmit="return confirm('Write this address to the WAF block list?');">
+  <button {% if not incident.ips %}disabled{% endif %}>Block</button>
+</form>
+<form method="post" action="/incidents/{{ incident.id }}/dismiss" onsubmit="return confirm('Close this incident without changing the WAF?');">
+  <button>Don't block</button>
+</form>
+<p>Block calls the existing function, which updates SentinelAutoBlock and posts the Teams card. Don't block writes an incident comment and closes it. Neither action uses SQL.</p>
+{% else %}
+<p>This sign-in can view the incident. An operator decides Block or Don't block.</p>
+{% endif %}
+{% endif %}
+{% endblock %}

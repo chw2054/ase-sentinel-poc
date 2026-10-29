@@ -1,0 +1,26 @@
+{% extends "base.html" %}
+{% block body %}
+{% if incident is none %}
+<p>Incident not found.</p>
+{% else %}
+<h1>Incident {{ incident.incident_number }}</h1>
+<p>{{ incident.title }}</p>
+<p>Severity {{ incident.severity }}. Sentinel status {{ incident.sentinel_status }}. Processing {{ incident.processing_status }}.</p>
+<p>Address {{ incident.ip_address }}.</p>
+{% if incident.sentinel_url %}<p><a href="{{ incident.sentinel_url }}">Open in Microsoft Sentinel</a></p>{% endif %}
+{% if principal and ("operator" in principal.roles or "admin" in principal.roles) %}
+<form method="post" action="/incidents/{{ incident.id }}/retry"><button>Retry approval</button></form>
+{% endif %}
+<h2>Approvals</h2>
+<table>
+  <tr><th>State</th><th>Proposed</th><th>Reviewer</th></tr>
+  {% for row in approvals %}
+  <tr>
+    <td><a href="/approvals/{{ row.id }}">{{ row.state }}</a></td>
+    <td>{{ row.proposed }}</td>
+    <td>{{ row.reviewer }}</td>
+  </tr>
+  {% endfor %}
+</table>
+{% endif %}
+{% endblock %}

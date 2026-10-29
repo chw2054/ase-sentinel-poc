@@ -1,0 +1,15 @@
+{% extends "base.html" %}
+{% block body %}
+<h1>SentinelAutoBlock</h1>
+<p class="banner">These values are the live WAF rule. Removing an address is a separate policy edit. This page does not write the policy.</p>
+{% if load_error %}<p class="error">{{ load_error }}</p>{% endif %}
+<p>{{ values | length }} / {{ cap }}</p>
+<table>
+  <tr><th>Address</th></tr>
+  {% for value in values %}
+  <tr><td>{{ value }}</td></tr>
+  {% else %}
+  <tr><td>The block rule is empty or absent.</td></tr>
+  {% endfor %}
+</table>
+{% endblock %}

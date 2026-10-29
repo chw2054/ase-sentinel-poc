@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+{% block body %}
+<h1>Service discovery</h1>
+<p class="banner">These rows are a fixture of the 591832 proof-of-concept names. This page did not query Azure Resource Graph. Confirming a row stores your selection. It does not attach the live policy.</p>
+<p>Saved configuration confirmed: {{ config.confirmed }}. Source: {{ config.document.source }}.</p>
+<h2>Application Gateway WAF policies</h2>
+{% for item in catalog.policies %}
+<form method="post" action="/discovery/confirm" class="panel">
+  <input type="hidden" name="policy_key" value="{{ item.policyKey }}">
+  <p>{{ item.name }} ({{ item.provider }}) on {{ item.gateway }}. {{ item.liveResourceNote }}</p>
+  <button>Use this Application Gateway policy</button>
+</form>
+{% endfor %}
+<h2>Sentinel workspaces</h2>
+<ul>
+  {% for item in catalog.workspaces %}
+  <li>{{ item.name }} in {{ item.resourceGroup }}. Sentinel {{ item.sentinel }}.</li>
+  {% endfor %}
+</ul>
+{% endblock %}
