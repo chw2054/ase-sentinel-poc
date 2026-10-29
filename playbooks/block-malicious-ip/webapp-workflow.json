@@ -1,0 +1,110 @@
+{
+  "$schema": "https://schema.management.azure.com/providers/Microsoft.Logic/schemas/2016-06-01/workflowdefinition.json#",
+  "contentVersion": "1.0.0.0",
+  "parameters": {
+    "$connections": { "defaultValue": {}, "type": "Object" },
+    "webAppUrl": { "defaultValue": "", "type": "String" },
+    "integrationKey": { "defaultValue": "", "type": "SecureString" },
+    "approverEmail": { "defaultValue": "", "type": "String" }
+  },
+  "triggers": {
+    "Microsoft_Sentinel_incident": {
+      "type": "ApiConnectionWebhook",
+      "inputs": {
+        "body": { "callback_url": "@{listCallbackUrl()}" },
+        "host": {
+          "connection": { "name": "@parameters('$connections')['azuresentinel']['connectionId']" }
+        },
+        "path": "/incident-creation"
+      }
+    }
+  },
+  "actions": {
+    "Entities_-_Get_IPs": {
+      "type": "ApiConnection",
+      "inputs": {
+        "body": "@triggerBody()?['object']?['properties']?['relatedEntities']",
+        "host": {
+          "connection": { "name": "@parameters('$connections')['azuresentinel']['connectionId']" }
+        },
+        "method": "post",
+        "path": "/entities/ip"
+      },
+      "runAfter": {}
+    },
+    "Select_IP_addresses": {
+      "type": "Select",
+      "inputs": {
+        "from": "@coalesce(body('Entities_-_Get_IPs')?['IPs'], json('[]'))",
+        "select": "@coalesce(item()?['Address'], '')"
+      },
+      "runAfter": { "Entities_-_Get_IPs": ["Succeeded"] }
+    },
+    "Check_web_app_url": {
+      "type": "If",
+      "expression": { "equals": ["@parameters('webAppUrl')", ""] },
+      "actions": {
+        "Terminate_-_web_app_not_bound": {
+          "type": "Terminate",
+          "inputs": { "runStatus": "Succeeded" }
+        }
+      },
+      "else": {
+        "actions": {
+          "Post_incident": {
+            "type": "Http",
+            "inputs": {
+              "uri": "@{concat(parameters('webAppUrl'), '/api/v1/integrations/sentinel/incidents')}",
+              "method": "POST",
+              "headers": {
+                "Content-Type": "application/json",
+                "x-integration-key": "@parameters('integrationKey')",
+                "x-correlation-id": "@{workflow()['run']['name']}"
+              },
+              "body": {
+                "sentinelIncidentId": "@{coalesce(triggerBody()?['object']?['id'], triggerBody()?['object']?['name'], '')}",
+                "incidentNumber": "@{coalesce(triggerBody()?['object']?['properties']?['incidentNumber'], '')}",
+                "title": "@{coalesce(triggerBody()?['object']?['properties']?['title'], '')}",
+                "severity": "@{coalesce(triggerBody()?['object']?['properties']?['severity'], '')}",
+                "sentinelStatus": "@{coalesce(triggerBody()?['object']?['properties']?['status'], '')}",
+                "ipAddresses": "@body('Select_IP_addresses')"
+              },
+              "retryPolicy": { "type": "none" }
+            },
+            "limit": { "timeout": "PT2M" },
+            "runAfter": {}
+          },
+          "Notification_requested": {
+            "type": "If",
+            "expression": {
+              "not": {
+                "equals": ["@coalesce(body('Post_incident')?['notification'], '')", ""]
+              }
+            },
+            "actions": {
+              "Send_review_email": {
+                "type": "ApiConnection",
+                "inputs": {
+                  "host": {
+                    "connection": { "name": "@parameters('$connections')['office365']['connectionId']" }
+                  },
+                  "method": "post",
+                  "path": "/v2/Mail",
+                  "body": {
+                    "To": "@parameters('approverEmail')",
+                    "Subject": "@{body('Post_incident')?['notification']?['subject']}",
+                    "Body": "@{body('Post_incident')?['notification']?['body']}",
+                    "Importance": "Normal"
+                  }
+                },
+                "runAfter": {}
+              }
+            },
+            "runAfter": { "Post_incident": ["Succeeded"] }
+          }
+        }
+      },
+      "runAfter": { "Select_IP_addresses": ["Succeeded"] }
+    }
+  }
+}
