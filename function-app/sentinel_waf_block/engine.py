@@ -172,10 +172,39 @@ class Engine:
         views, failure = self._policy_views(config, enforceable, rejections)
         if failure is not None:
             return failure
-        listed = {value for _policy_id, view in views for value in view.existing_values}
-        new = [address for address in enforceable if address not in listed]
-        if not new:
+        plans = []
+        full: list[str] = []
+        for policy_id, view in views:
+            # Copy the address onto every policy that can still take it. A
+            # policy at 600 is left unchanged. One gateway enforces only the
+            # policy attached to it, so the duplicate is what makes the block
+            # apply on each of those gateways.
+            missing = [address for address in enforceable if address not in view.existing_values]
+            if not missing:
+                continue
+            merged, added = merge_addresses(list(view.existing_values), missing)
+            if exceeds_capacity(merged, MATCH_VALUES_PER_POLICY):
+                full.append(policy_id)
+                continue
+            plans.append((policy_id, view, merged, added))
+        if not plans:
             policy_id, view = views[0]
+            if full:
+                return _result(
+                    STATUS_CAPACITY,
+                    candidate_addresses=tuple(enforceable),
+                    new_addresses=tuple(address for address in enforceable if address not in view.existing_values),
+                    rejected_addresses=rejections,
+                    existing_count=len(view.existing_values),
+                    resulting_count=len(view.existing_values) + len(enforceable),
+                    policy_resource_id=policy_id,
+                    reason=(
+                        f"every block policy that is missing an address already holds "
+                        f"{MATCH_VALUES_PER_POLICY} addresses; "
+                        f"tag another policy {BLOCK_POLICY_TAG}=true; "
+                        f"proposed {', '.join(address for address in enforceable if address not in view.existing_values)}"
+                    ),
+                )
             return _result(
                 STATUS_ALREADY_BLOCKED,
                 candidate_addresses=tuple(enforceable),
@@ -185,47 +214,49 @@ class Engine:
                 policy_resource_id=policy_id,
                 reason="address is already listed",
             )
-        chosen = None
-        for policy_id, view in views:
-            merged, added = merge_addresses(list(view.existing_values), new)
-            if not exceeds_capacity(merged, MATCH_VALUES_PER_POLICY):
-                chosen = (policy_id, view, merged, added)
-                break
-        if chosen is None:
-            return _result(
-                STATUS_CAPACITY,
-                candidate_addresses=tuple(enforceable),
-                new_addresses=tuple(new),
-                rejected_addresses=rejections,
-                existing_count=len(views[0][1].existing_values),
-                resulting_count=len(views[0][1].existing_values) + len(new),
-                policy_resource_id=views[0][0],
-                reason=(
-                    f"every block policy holds {MATCH_VALUES_PER_POLICY} addresses; "
-                    f"tag another policy {BLOCK_POLICY_TAG}=true; "
-                    f"proposed {', '.join(new)}"
-                ),
-            )
-        policy_id, view, merged, added = chosen
+        added_all: list[str] = []
+        seen_added: set[str] = set()
+        for _policy_id, _view, _merged, added in plans:
+            for address in added:
+                if address not in seen_added:
+                    seen_added.add(address)
+                    added_all.append(address)
+        written_ids = [policy_id for policy_id, _view, _merged, _added in plans]
+        _policy_id, view, merged, _added = plans[0]
         base = _result(
             STATUS_DRY_RUN,
             candidate_addresses=tuple(enforceable),
-            new_addresses=tuple(added),
+            new_addresses=tuple(added_all),
             rejected_addresses=rejections,
             existing_count=len(view.existing_values),
             resulting_count=len(merged),
-            policy_resource_id=policy_id,
+            policy_resource_id=", ".join(written_ids),
         )
         if not enforcement_enabled(config.auto_block_enabled):
             return base
-        body = build_put_body(view, merged, config)
-        try:
-            self._waf.put_policy(policy_id, config.arm_api_version, body, timeout_seconds=120)
-        except AuthenticationError:
-            return replace(base, status=STATUS_PUT, changed=False, reason="authentication failed")
-        except WafPutError as exc:
-            return replace(base, status=STATUS_PUT, changed=False, reason=_safe_text(exc))
-        return replace(base, status=STATUS_BLOCKED, changed=True, reason="")
+        written: list[str] = []
+        for policy_id, view, merged, _added in plans:
+            body = build_put_body(view, merged, config)
+            try:
+                self._waf.put_policy(policy_id, config.arm_api_version, body, timeout_seconds=120)
+            except AuthenticationError:
+                return replace(
+                    base,
+                    status=STATUS_PUT,
+                    changed=bool(written),
+                    policy_resource_id=", ".join(written),
+                    reason="authentication failed",
+                )
+            except WafPutError as exc:
+                return replace(
+                    base,
+                    status=STATUS_PUT,
+                    changed=bool(written),
+                    policy_resource_id=", ".join(written),
+                    reason=_safe_text(exc),
+                )
+            written.append(policy_id)
+        return replace(base, status=STATUS_BLOCKED, changed=True, policy_resource_id=", ".join(written), reason="")
 
     def _policy_views(self, config: Config, enforceable: list[str], rejections: tuple[Rejection, ...]):
         views = []

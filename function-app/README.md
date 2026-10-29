@@ -77,7 +77,7 @@ Environment variables are the alternative. `AUTO_BLOCK_ENABLED`, `OVERRIDE_PROTE
 | `blockRulePriority` | `10` |
 | `armApiVersion` | `2024-05-01` for Application Gateway, `2024-02-01` for Front Door |
 
-Each IPMatch condition holds 600 addresses. `maximumBlockEntries` is no longer that ceiling. A WAF policy tagged `ase-sentinel-block-list=true` is another block list; the function fills the configured policy first and then a tagged policy that still has room.
+Each IPMatch condition holds 600 addresses. `maximumBlockEntries` is no longer that ceiling. A WAF policy tagged `ase-sentinel-block-list=true` is another block list. One block writes the same address to every tagged policy that is still below 600. A policy that already holds 600 is left unchanged. A gateway blocks the address only when the policy attached to that gateway received it.
 
 ## Local testing
 

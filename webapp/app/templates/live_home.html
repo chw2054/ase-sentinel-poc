@@ -2,7 +2,7 @@
 {% block body %}
 <h1>Open incidents</h1>
 {% include "live_context.html" %}
-<p class="banner">Read from Microsoft Sentinel and the tagged WAF policies. {{ pending }} still need a decision. {{ blocks }} addresses are on the block list. Each policy holds {{ per_policy }}.</p>
+<p class="banner">Read from Microsoft Sentinel and the tagged WAF policies. {{ pending }} still need a decision. {{ blocks }} addresses are on the block list. Each new address is written to every policy that is still below {{ per_policy }}.</p>
 {% if load_error %}<p class="error">{{ load_error }}</p>{% endif %}
 <table>
   <tr><th>Number</th><th>Title</th><th>Severity</th><th>IP</th><th>WAF</th></tr>

@@ -246,6 +246,48 @@ def test_full_policy_writes_the_next_tagged_policy() -> None:
     assert values == ["203.0.113.5"]
 
 
+def test_address_is_written_to_every_policy_that_has_room() -> None:
+    primary = config().waf_policy_resource_id
+    second = primary + "-2"
+    first = agw_policy(agw_block_rule(["198.51.100.4"]))
+    second_doc = agw_policy(agw_block_rule(["198.51.100.8"]))
+
+    class _Both(FakeWaf):
+        def __init__(self) -> None:
+            super().__init__(first)
+            self.docs = {primary: first, second: second_doc}
+            self.written: list[str] = []
+
+        def get_policy(self, resource_id: str, api_version: str) -> dict:
+            self.gets.append((resource_id, api_version))
+            return copy.deepcopy(self.docs[resource_id])
+
+        def tagged_policy_ids(self, policy_resource_id: str, api_version: str) -> list[str]:
+            return [second]
+
+        def put_policy(self, resource_id: str, api_version: str, body: dict, timeout_seconds: float = 120) -> None:
+            self.written.append(resource_id)
+            self.puts.append(body)
+
+    waf = _Both()
+    app, _waf, _comments = engine(waf)
+    result = app.execute(incident("203.0.113.5"), config(auto_block_enabled=True))
+    assert result.status == "blocked"
+    assert result.policy_resource_id == f"{primary}, {second}"
+    assert waf.written == [primary, second]
+    for body in waf.puts:
+        values = body["properties"]["customRules"][0]["matchConditions"][0]["matchValues"]
+        assert "203.0.113.5" in values
+    assert waf.puts[0]["properties"]["customRules"][0]["matchConditions"][0]["matchValues"] == [
+        "198.51.100.4",
+        "203.0.113.5",
+    ]
+    assert waf.puts[1]["properties"]["customRules"][0]["matchConditions"][0]["matchValues"] == [
+        "198.51.100.8",
+        "203.0.113.5",
+    ]
+
+
 def test_tag_lookup_failure_still_writes_the_configured_policy() -> None:
     class _Blind(FakeWaf):
         def tagged_policy_ids(self, policy_resource_id: str, api_version: str) -> list[str]:

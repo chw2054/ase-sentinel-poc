@@ -45,15 +45,15 @@ def render(result: Result, incident: Incident, config: Config) -> str:
                 "<p>Provider: "
                 f"{provider}. Policy: {policy}. Custom rule that would be updated: {rule}. "
                 "Resulting list size if blocking were enabled: "
-                f"{size} of {MATCH_VALUES_PER_POLICY} on this policy.</p>"
+                f"{size} of {MATCH_VALUES_PER_POLICY} on each policy that still has room.</p>"
             )
         else:
             kind = "variable" if config.waf_provider == APPLICATION_GATEWAY else "matchVariable"
             parts.append(
                 f"<p>Custom rule {rule}, {kind} RemoteAddr, operator IPMatch, action Block, "
                 f"priority {config.block_rule_priority}. List size {size} of "
-                f"{MATCH_VALUES_PER_POLICY} on this policy. Other custom rules were kept. "
-                f"Policy: {policy}.</p>"
+                f"{MATCH_VALUES_PER_POLICY} on each policy that still has room. "
+                f"Other custom rules were kept. Policies: {policy}.</p>"
             )
             if config.waf_provider == APPLICATION_GATEWAY:
                 parts.append("<p>Read-only policy links were not sent back on the PUT.</p>")

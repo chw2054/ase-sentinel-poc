@@ -2,7 +2,7 @@
 {% block body %}
 <h1>Block list</h1>
 {% include "live_context.html" %}
-<p class="banner">Addresses come from every WAF policy tagged as a block list, plus the configured policy. Each policy holds {{ per_policy }}. Removing an address is a separate policy edit.</p>
+<p class="banner">The same address is stored on every WAF policy that is still below {{ per_policy }}. A full policy is skipped. A gateway blocks an address when the policy attached to that gateway contains it. Removing an address is a separate policy edit.</p>
 {% if load_error %}<p class="error">{{ load_error }}</p>{% endif %}
 <table>
   <tr><th>Address</th><th>WAF policy</th><th>Application Gateway</th></tr>
