@@ -3,7 +3,7 @@ import copy
 from sentinel_waf_block.addresses import REASON_BUILTIN_V4, REASON_INVALID_V4
 from sentinel_waf_block.engine import CommentError, Engine, WafGetError, WafPutError
 from sentinel_waf_block.models import STATUS_COMMENT
-from tests.conftest import (
+from tests.engine.conftest import (
     FakeComments,
     FakeWaf,
     agw_block_rule,

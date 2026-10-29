@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parents[2]
+ROOT = Path(__file__).resolve().parents[3]
 THIN = ROOT / "playbooks" / "block-malicious-ip" / "thin-workflow.json"
 REFERENCE = ROOT / "playbooks" / "block-malicious-ip" / "workflow.json"
 PLAYBOOK = ROOT / "infra" / "modules" / "playbook.bicep"

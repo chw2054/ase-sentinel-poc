@@ -1,13 +1,14 @@
-"""Thin HTTP adapter. Business rules live in sentinel_waf_block."""
+"""HTTP-agnostic entry point used by the operations app and its block API.
+
+The playbook posts the same JSON the Function App used to accept. The page
+handlers call this directly. Neither path imports a web framework.
+"""
 
 from __future__ import annotations
 
-import json
 import logging
 import os
 from dataclasses import replace
-
-import azure.functions as func
 
 from sentinel_waf_block.azure_clients import ArmWafClient, SentinelCommentClient
 from sentinel_waf_block.config import ConfigError, config_from_env
@@ -23,14 +24,13 @@ from sentinel_waf_block.models import (
 )
 from sentinel_waf_block.notifiers import DEFAULT_EVENTS, FLOW_AUDIENCE, TeamsWorkflowNotifier
 
-log = logging.getLogger("sentinel_waf_block.function")
-app = func.FunctionApp(http_auth_level=func.AuthLevel.FUNCTION)
+log = logging.getLogger("sentinel_waf_block.service")
 
 
-def _execution_override(execution: str, config: Config) -> Config:
+def execution_override(execution: str, config: Config) -> Config:
     # execution is authoritative and fail-closed. The playbook sends
     # execution=enforce only after an approver chose Approve. The operations
-    # app sends it for a manual add or remove.
+    # app sends it for a manual add, remove, or incident block.
     if execution == "enforce":
         return replace(config, auto_block_enabled=True)
     if execution == "dry-run":
@@ -38,11 +38,11 @@ def _execution_override(execution: str, config: Config) -> Config:
     return config
 
 
-def _effective_config(incident: Incident, config: Config) -> Config:
-    return _execution_override(incident.execution, config)
+def effective_config(incident: Incident, config: Config) -> Config:
+    return execution_override(incident.execution, config)
 
 
-def _notifier_from_env() -> TeamsWorkflowNotifier | None:
+def notifier_from_env() -> TeamsWorkflowNotifier | None:
     url = os.environ.get("NOTIFY_TEAMS_URL", "")
     if not url:
         return None
@@ -55,44 +55,27 @@ def _notifier_from_env() -> TeamsWorkflowNotifier | None:
     return TeamsWorkflowNotifier(url, events=events, auth_scope=auth_scope)
 
 
-@app.route(route="SentinelWafAutoBlock", methods=["POST"])
-def sentinel_waf_auto_block(req: func.HttpRequest) -> func.HttpResponse:
-    try:
-        payload = req.get_json()
-    except ValueError:
-        return _response(
-            {"status": STATUS_VALIDATION, "changed": False, "reason": "request body is not JSON"},
-            400,
-        )
+def execute_payload(payload: object) -> tuple[int, dict[str, object]]:
+    """Run one block request. Returns an HTTP status and a JSON object."""
+
     try:
         manual = manual_from_payload(payload)
         config = config_from_env()
         incident = None if manual is not None else incident_from_payload(payload)
     except InputError as exc:
-        return _response({"status": STATUS_VALIDATION, "changed": False, "reason": str(exc)}, 400)
+        return 400, {"status": STATUS_VALIDATION, "changed": False, "reason": str(exc)}
     except ConfigError as exc:
-        return _response(
-            {"status": STATUS_VALIDATION, "changed": False, "reason": "configuration: " + str(exc)},
-            500,
-        )
+        return 500, {"status": STATUS_VALIDATION, "changed": False, "reason": "configuration: " + str(exc)}
     try:
-        engine = Engine(ArmWafClient(), SentinelCommentClient(), _notifier_from_env())
+        engine = Engine(ArmWafClient(), SentinelCommentClient(), notifier_from_env())
         if manual is not None:
             operation, address, execution = manual
-            shown = _execution_override(execution, config)
-            result = (
-                engine.add_entry(address, shown)
-                if operation == "add"
-                else engine.remove_entry(address, shown)
-            )
+            shown = execution_override(execution, config)
+            result = engine.add_entry(address, shown) if operation == "add" else engine.remove_entry(address, shown)
         else:
             assert incident is not None
-            result = engine.execute(incident, _effective_config(incident, config))
+            result = engine.execute(incident, effective_config(incident, config))
     except Exception:
         log.warning("unhandled failure during execution")
-        return _response({"status": STATUS_INTERNAL, "changed": False, "reason": "internal error"}, 500)
-    return _response(result.to_dict(), 200)
-
-
-def _response(body: dict[str, object], status: int) -> func.HttpResponse:
-    return func.HttpResponse(json.dumps(body), status_code=status, mimetype="application/json")
+        return 500, {"status": STATUS_INTERNAL, "changed": False, "reason": "internal error"}
+    return 200, result.to_dict()

@@ -1,4 +1,7 @@
-# Deploys the ASE WAF -> Sentinel -> Function App block proof of concept.
+# Deploys the ASE WAF -> Sentinel -> block proof of concept.
+# The live block API is the operations web app, not a Function App.
+# Do not run this script against the live resource group: the main template
+# redeploys the playbook and can reset the Office 365 connection.
 # AUTO_BLOCK_ENABLED defaults to the JSON boolean true. Pass -AutoBlockEnabled $false for dry-run.
 # Requires Azure CLI, a subscription, and rights to create the resource group,
 # role assignments, and Microsoft Sentinel. This script does not register resource providers.

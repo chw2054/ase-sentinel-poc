@@ -85,7 +85,7 @@ Front Door path (not deployed):
 | `sentinel/analytics-rules/` | KQL per WAF product and log schema |
 | `sentinel/automation-rules/` | Second deployment. Sentinel rejects `RunPlaybook` until Azure Security Insights can run playbooks |
 | `playbooks/block-malicious-ip/` | Thin Logic App. `workflow.json` is the expression reference and is not deployed |
-| `function-app/` | Azure Function App for the block decision |
+| `webapp/` | Operations app and `POST /api/SentinelWafAutoBlock` |
 | `scripts/deploy.ps1` | Supported deploy path, including the automation-rule phase |
 | `scripts/test.ps1` | Sends the probe marker |
 | `scripts/cleanup.ps1` | Deletes the resource group after the name is confirmed |
@@ -189,7 +189,7 @@ Incident created
   -> automation rule (only this analytics rule)
   -> playbook trigger /incident-creation
   -> Entities - Get IPs
-  -> POST /api/SentinelWafAutoBlock
+  -> POST /api/SentinelWafAutoBlock on the operations web app
   -> reject empty, non-canonical, and protected addresses
   -> GET the WAF policy (read)
   -> skip addresses already on any SentinelAutoBlock custom rule
@@ -198,15 +198,15 @@ Incident created
   -> if autoBlockEnabled is true: PUT that one custom rule, then comment
 ```
 
-The function writes the decision comment. The Logic App writes a comment when entity lookup or the function call fails, and that comment does not say the address was blocked. A failed PUT comment says not to assume the address was blocked.
+The web app writes the decision comment. The Logic App writes a comment when entity lookup or the block API call fails, and that comment does not say the address was blocked. A failed PUT comment says not to assume the address was blocked.
 
 ## How dry-run works
 
-The deployed default of `autoBlockEnabled` is `true` in Bicep, in `infra/parameters/main.bicepparam`, in the Function App setting, and in `scripts/deploy.ps1`. Pass `-AutoBlockEnabled $false` to deploy a dry-run. If the Function App setting is missing, the function stays in dry-run.
+The Bicep default of `autoBlockEnabled` is `true` in `infra/parameters/main.bicepparam` and in `scripts/deploy.ps1`. The live operations app keeps `AUTO_BLOCK_ENABLED` as the JSON boolean `false`. The playbook sends `execution=dry-run`, then `execution=enforce` only after approval. If the setting is missing, the service stays in dry-run unless that request sets `execution`.
 
-When the value is not the boolean `true`:
+When the effective value is not the boolean `true`:
 
-- The function still validates the IP and reads the policy when an enforceable address exists.
+- The service still validates the IP and reads the policy when an enforceable address exists.
 - If the address is already on the block rule, the comment says so and does not say "Would block".
 - Otherwise the incident comment contains the exact text `Would block IP: <address>` (one line per new address, separated by `<br>`).
 - There is no PUT on that path. The WAF policy and any network configuration are unchanged.
@@ -336,7 +336,7 @@ This repository does not answer these. The Application Gateway resources are a d
 │   ├── automation-rules/
 │   └── queries/
 ├── playbooks/block-malicious-ip/
-├── function-app/
+├── webapp/
 ├── scripts/
 │   ├── deploy.ps1
 │   ├── test.ps1

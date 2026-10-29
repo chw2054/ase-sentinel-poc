@@ -30,8 +30,7 @@ class Settings:
     resource_group: str = ""
     workspace_name: str = ""
     waf_policy_id: str = ""
-    function_url: str = ""
-    function_key: str = ""
+    block_api_key: str = ""
     block_policy_tag: str = "ase-sentinel-block-list"
 
     @classmethod
@@ -63,8 +62,7 @@ class Settings:
             resource_group=os.environ.get("AZURE_RESOURCE_GROUP", ""),
             workspace_name=os.environ.get("SENTINEL_WORKSPACE_NAME", ""),
             waf_policy_id=os.environ.get("WAF_POLICY_RESOURCE_ID", ""),
-            function_url=os.environ.get("BLOCK_FUNCTION_URL", ""),
-            function_key=os.environ.get("BLOCK_FUNCTION_KEY", ""),
+            block_api_key=os.environ.get("BLOCK_API_KEY", ""),
             block_policy_tag=os.environ.get("BLOCK_POLICY_TAG", "ase-sentinel-block-list"),
         )
 
@@ -90,8 +88,7 @@ class Settings:
                 ("AZURE_RESOURCE_GROUP", self.resource_group),
                 ("SENTINEL_WORKSPACE_NAME", self.workspace_name),
                 ("WAF_POLICY_RESOURCE_ID", self.waf_policy_id),
-                ("BLOCK_FUNCTION_URL", self.function_url),
-                ("BLOCK_FUNCTION_KEY", self.function_key),
+                ("BLOCK_API_KEY", self.block_api_key),
             )
             if not value
         ]
@@ -99,13 +96,5 @@ class Settings:
             raise RuntimeError("live Azure mode requires " + ", ".join(missing))
         if not self.waf_policy_id.startswith("/subscriptions/"):
             raise RuntimeError("WAF_POLICY_RESOURCE_ID must be an ARM resource id")
-        url = self.function_url
-        if (
-            not url.startswith("https://")
-            or "SentinelWafAutoBlock" not in url
-            or "code=" in url
-            or "sig=" in url
-        ):
-            raise RuntimeError("BLOCK_FUNCTION_URL must be the https function route without a key")
         if self.app_env != "local" and self.dev_login_password:
             raise RuntimeError("production must not set DEV_LOGIN_PASSWORD")

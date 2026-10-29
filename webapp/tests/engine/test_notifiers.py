@@ -10,7 +10,7 @@ from sentinel_waf_block.notifiers import (
     FLOW_AUDIENCE,
     TeamsWorkflowNotifier,
 )
-from tests.conftest import (
+from tests.engine.conftest import (
     FakeNotifier,
     FakeWaf,
     agw_block_rule,

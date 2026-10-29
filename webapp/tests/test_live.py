@@ -1,4 +1,4 @@
-"""Live mode reads Sentinel and the WAF policy. The function is the only block write."""
+"""Live mode reads Sentinel and the WAF policy. The web app engine is the only block write."""
 
 import json
 
@@ -42,8 +42,7 @@ def settings() -> Settings:
         resource_group="rg",
         workspace_name=WORKSPACE,
         waf_policy_id=POLICY_ID,
-        function_url="https://fn.example/api/SentinelWafAutoBlock",
-        function_key="test-key",
+        block_api_key="test-key",
         poc_admins="admin@mngenvmcap591832.onmicrosoft.com",
     )
 
@@ -182,38 +181,43 @@ def transport(calls: list[httpx.Request]) -> httpx.MockTransport:
             return httpx.Response(200, json={"name": "comment"})
         if request.method == "PUT" and url.endswith(f"/{INCIDENT_ID}?api-version=2024-03-01"):
             return httpx.Response(200, json={"name": INCIDENT_ID})
-        if request.method == "POST" and url.startswith("https://fn.example/"):
-            posted = json.loads(request.content)
-            if posted.get("operation") == "remove":
-                return httpx.Response(
-                    200,
-                    json={
-                        "status": "removed",
-                        "changed": True,
-                        "written_rule": "SentinelAutoBlock",
-                        "new_addresses": [posted.get("address")],
-                        "notify_error": "",
-                    },
-                )
-            if posted.get("operation") == "add":
-                return httpx.Response(
-                    200,
-                    json={
-                        "status": "blocked",
-                        "changed": True,
-                        "written_rule": "SentinelAutoBlock-2",
-                        "new_addresses": ["203.0.113.0/24"],
-                        "notify_error": "",
-                    },
-                )
-            return httpx.Response(200, json={"status": "blocked", "changed": True, "notify_error": ""})
         return httpx.Response(500, json={"error": {"message": "unexpected " + url}})
 
     return httpx.MockTransport(handle)
 
 
-def client(calls: list[httpx.Request]) -> TestClient:
-    azure = SentinelAzure(settings(), http=httpx.Client(transport=transport(calls)), token=lambda: "arm-token")
+def _block_result(recorded: list[dict]):
+    def block(payload: object) -> tuple[int, dict]:
+        assert isinstance(payload, dict)
+        recorded.append(payload)
+        if payload.get("operation") == "remove":
+            return 200, {
+                "status": "removed",
+                "changed": True,
+                "written_rule": "SentinelAutoBlock",
+                "new_addresses": [payload.get("address")],
+                "notify_error": "",
+            }
+        if payload.get("operation") == "add":
+            return 200, {
+                "status": "blocked",
+                "changed": True,
+                "written_rule": "SentinelAutoBlock-2",
+                "new_addresses": ["203.0.113.0/24"],
+                "notify_error": "",
+            }
+        return 200, {"status": "blocked", "changed": True, "notify_error": ""}
+
+    return block
+
+
+def client(calls: list[httpx.Request], recorded: list[dict] | None = None) -> TestClient:
+    azure = SentinelAzure(
+        settings(),
+        http=httpx.Client(transport=transport(calls)),
+        token=lambda: "arm-token",
+        block=_block_result(recorded if recorded is not None else []),
+    )
     return TestClient(create_app(settings(), azure))
 
 
@@ -270,18 +274,16 @@ def test_home_lists_the_sentinel_incident_and_skips_sql() -> None:
 
 def test_block_posts_execution_enforce_and_does_not_close() -> None:
     calls: list[httpx.Request] = []
-    api = client(calls)
+    recorded: list[dict] = []
+    api = client(calls, recorded)
     sign_in(api)
     response = api.post(f"/incidents/{INCIDENT_ID}/block", follow_redirects=False)
     assert response.status_code == 303
     assert "SentinelAutoBlock" in response.headers["location"]
-    function_calls = [call for call in calls if str(call.url).startswith("https://fn.example/")]
-    assert len(function_calls) == 1
-    body = json.loads(function_calls[0].content)
-    assert body["execution"] == "enforce"
-    assert body["ipEntities"] == ["203.0.113.9"]
-    assert body["incidentArmId"] == ARM_ID
-    assert function_calls[0].headers["x-functions-key"] == "test-key"
+    assert len(recorded) == 1
+    assert recorded[0]["execution"] == "enforce"
+    assert recorded[0]["ipEntities"] == ["203.0.113.9"]
+    assert recorded[0]["incidentArmId"] == ARM_ID
     assert not any(call.method == "PUT" and "/comments/" in str(call.url) for call in calls)
 
 
@@ -290,9 +292,10 @@ def test_cidr_entry_covers_an_incident_host() -> None:
     assert not _on_block_list(("198.51.100.4",), {"203.0.113.0/24"})
 
 
-def test_block_page_adds_and_removes_an_ip_or_cidr_through_the_function() -> None:
+def test_block_page_adds_and_removes_an_ip_or_cidr() -> None:
     calls: list[httpx.Request] = []
-    api = client(calls)
+    recorded: list[dict] = []
+    api = client(calls, recorded)
     sign_in(api)
     added = api.post("/blocks", data={"address": "203.0.113.5/24"}, follow_redirects=False)
     assert added.status_code == 303
@@ -300,28 +303,26 @@ def test_block_page_adds_and_removes_an_ip_or_cidr_through_the_function() -> Non
     removed = api.post("/blocks/remove", data={"address": "198.51.100.4"}, follow_redirects=False)
     assert removed.status_code == 303
     assert "Removed%20198.51.100.4" in removed.headers["location"]
-    function_calls = [call for call in calls if str(call.url).startswith("https://fn.example/")]
-    assert len(function_calls) == 2
-    bodies = [json.loads(call.content) for call in function_calls]
-    assert bodies[0] == {"operation": "add", "address": "203.0.113.5/24", "execution": "enforce"}
-    assert bodies[1] == {"operation": "remove", "address": "198.51.100.4", "execution": "enforce"}
-    assert all(call.headers["x-functions-key"] == "test-key" for call in function_calls)
+    assert recorded[0] == {"operation": "add", "address": "203.0.113.5/24", "execution": "enforce"}
+    assert recorded[1] == {"operation": "remove", "address": "198.51.100.4", "execution": "enforce"}
     assert not any(call.method == "PUT" for call in calls)
 
 
 def test_viewer_cannot_edit_the_block_list() -> None:
     calls: list[httpx.Request] = []
-    api = client(calls)
+    recorded: list[dict] = []
+    api = client(calls, recorded)
     sign_in(api, "viewer@localhost")
     response = api.post("/blocks/remove", data={"address": "198.51.100.4"}, follow_redirects=False)
     assert response.status_code == 303
     assert "does%20not%20allow" in response.headers["location"]
-    assert not any(str(call.url).startswith("https://fn.example/") for call in calls)
+    assert recorded == []
 
 
-def test_dismiss_closes_without_calling_the_function() -> None:
+def test_dismiss_closes_without_calling_the_block_service() -> None:
     calls: list[httpx.Request] = []
-    api = client(calls)
+    recorded: list[dict] = []
+    api = client(calls, recorded)
     sign_in(api)
     response = api.post(f"/incidents/{INCIDENT_ID}/dismiss", follow_redirects=False)
     assert response.status_code == 303
@@ -333,17 +334,49 @@ def test_dismiss_closes_without_calling_the_function() -> None:
     assert body["properties"]["classification"] == "BenignPositive"
     assert body["properties"]["labels"][0]["labelName"] == "poc-simulated-probe"
     assert "chose not to block 203.0.113.9" in body["properties"]["classificationComment"]
-    assert not any(str(call.url).startswith("https://fn.example/") for call in calls)
+    assert recorded == []
 
 
 def test_viewer_cannot_block() -> None:
     calls: list[httpx.Request] = []
-    api = client(calls)
+    recorded: list[dict] = []
+    api = client(calls, recorded)
     sign_in(api, "viewer@localhost")
     response = api.post(f"/incidents/{INCIDENT_ID}/block", follow_redirects=False)
     assert response.status_code == 303
     assert "does%20not%20allow" in response.headers["location"]
-    assert not any(str(call.url).startswith("https://fn.example/") for call in calls)
+    assert recorded == []
+
+
+def test_playbook_api_requires_the_shared_key() -> None:
+    calls: list[httpx.Request] = []
+    recorded: list[dict] = []
+    api = client(calls, recorded)
+    missing = api.post("/api/SentinelWafAutoBlock", json={"execution": "dry-run"})
+    assert missing.status_code == 401
+    assert missing.json()["reason"] == "unauthorized"
+    wrong = api.post(
+        "/api/SentinelWafAutoBlock",
+        headers={"x-functions-key": "nope"},
+        json={"execution": "dry-run"},
+    )
+    assert wrong.status_code == 401
+    assert recorded == []
+    accepted = api.post(
+        "/api/SentinelWafAutoBlock",
+        headers={"x-functions-key": "test-key"},
+        json={"incidentArmId": ARM_ID, "execution": "dry-run"},
+    )
+    assert accepted.status_code == 200
+    assert accepted.json()["status"] == "blocked"
+    assert recorded == [{"incidentArmId": ARM_ID, "execution": "dry-run"}]
+    garbage = api.post(
+        "/api/SentinelWafAutoBlock",
+        headers={"x-functions-key": "test-key"},
+        content=b"not-json",
+    )
+    assert garbage.status_code == 400
+    assert garbage.json()["reason"] == "request body is not JSON"
 
 
 def test_sql_mode_stays_on_the_fixture() -> None:

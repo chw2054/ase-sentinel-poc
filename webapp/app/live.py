@@ -1,21 +1,24 @@
 """Live operations pages. Sentinel is the queue and the WAF policy is the block list.
 
-Block posts the existing function with execution=enforce. That one field writes
-SentinelAutoBlock even when the function app's AUTO_BLOCK_ENABLED is false.
+Block, add, and remove call the in-process engine with execution=enforce. That
+one field writes a block-list rule even when AUTO_BLOCK_ENABLED is false.
+The playbook posts the same engine at /api/SentinelWafAutoBlock.
 Don't block only comments and closes the incident.
 """
 
 from __future__ import annotations
 
+import hmac
 import ipaddress
 import uuid
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from urllib.parse import quote
 
 import httpx
 from fastapi import FastAPI, Request
-from fastapi.responses import RedirectResponse
+from fastapi.responses import JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
@@ -32,7 +35,7 @@ TEMPLATES = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
 
 
 class AzureCallError(Exception):
-    """A Sentinel, WAF, or function call failed. The message never includes a key."""
+    """A Sentinel or WAF call failed. The message never includes a key."""
 
 
 @dataclass(frozen=True)
@@ -94,12 +97,19 @@ class LiveIncident:
 
 
 class SentinelAzure:
-    """ARM reads plus one function POST. This client does not PUT the WAF policy."""
+    """ARM reads plus the in-process block engine. Page handlers do not PUT the WAF."""
 
-    def __init__(self, settings: Settings, http: httpx.Client | None = None, token=None) -> None:
+    def __init__(
+        self,
+        settings: Settings,
+        http: httpx.Client | None = None,
+        token=None,
+        block: Callable[[object], tuple[int, dict]] | None = None,
+    ) -> None:
         self.settings = settings
         self.http = http or httpx.Client(timeout=30.0)
         self._token = token or _msi_token
+        self.block = block or _engine_payload
 
     def list_open(self) -> list[LiveIncident]:
         # api-version has to travel in params. A URL that already has a query
@@ -271,47 +281,27 @@ class SentinelAzure:
             raise AzureCallError("this incident has no IPv4 address")
         if not incident.arm_id.startswith("/"):
             raise AzureCallError("the incident resource id is missing")
-        response = self.http.post(
-            self.settings.function_url,
-            headers={
-                "Content-Type": "application/json",
-                "x-functions-key": self.settings.function_key,
-            },
-            json={
+        return self._call_block(
+            {
                 "incidentArmId": incident.arm_id,
                 "incidentNumber": incident.number,
                 "incidentTitle": incident.title,
                 "ipEntities": list(incident.ips),
                 "execution": "enforce",
-            },
+            }
         )
-        if response.status_code >= 400:
-            raise AzureCallError(_public_error(response))
-        try:
-            body = response.json()
-        except ValueError as exc:
-            raise AzureCallError("the block function did not return JSON") from exc
-        if not isinstance(body, dict):
-            raise AzureCallError("the block function did not return JSON")
-        return body
 
     def change_block(self, address: str, operation: str) -> dict:
-        response = self.http.post(
-            self.settings.function_url,
-            headers={
-                "Content-Type": "application/json",
-                "x-functions-key": self.settings.function_key,
-            },
-            json={"operation": operation, "address": address, "execution": "enforce"},
-        )
-        if response.status_code >= 400:
-            raise AzureCallError(_public_error(response))
-        try:
-            body = response.json()
-        except ValueError as exc:
-            raise AzureCallError("the block function did not return JSON") from exc
+        return self._call_block({"operation": operation, "address": address, "execution": "enforce"})
+
+    def _call_block(self, payload: dict) -> dict:
+        status, body = self.block(payload)
         if not isinstance(body, dict):
-            raise AzureCallError("the block function did not return JSON")
+            raise AzureCallError("the block service did not return JSON")
+        if status >= 400:
+            reason = body.get("reason") if isinstance(body.get("reason"), str) else ""
+            reason = " ".join(reason.split())[:300]
+            raise AzureCallError(f"The block service returned HTTP {status}. {reason}".strip())
         return body
 
     def dismiss(self, incident: LiveIncident, actor: str) -> None:
@@ -389,6 +379,23 @@ def build_live_app(settings: Settings, azure: SentinelAzure | None = None) -> Fa
     return app
 
 
+def _engine_payload(payload: object) -> tuple[int, dict]:
+    from sentinel_waf_block.service import execute_payload
+
+    return execute_payload(payload)
+
+
+def _api_key_ok(request: Request) -> bool:
+    expected = request.app.state.settings.block_api_key
+    provided = request.headers.get("x-functions-key", "")
+    if not expected or not provided:
+        return False
+    try:
+        return hmac.compare_digest(provided.encode(), expected.encode())
+    except Exception:
+        return False
+
+
 def _routes():
     from fastapi import APIRouter, Form
 
@@ -397,6 +404,24 @@ def _routes():
     @ui.get("/health")
     def health() -> dict:
         return {"status": "ok", "liveAzure": True, "sql": False}
+
+    @ui.post("/api/SentinelWafAutoBlock")
+    async def block_api(request: Request):
+        # Easy Auth excludes this path. The header is the playbook shared secret.
+        if not _api_key_ok(request):
+            return JSONResponse(
+                {"status": "validation-failed", "changed": False, "reason": "unauthorized"},
+                status_code=401,
+            )
+        try:
+            payload = await request.json()
+        except Exception:
+            return JSONResponse(
+                {"status": "validation-failed", "changed": False, "reason": "request body is not JSON"},
+                status_code=400,
+            )
+        status, body = request.app.state.azure.block(payload)
+        return JSONResponse(body, status_code=status)
 
     @ui.get("/login")
     def login_form(request: Request):
@@ -491,7 +516,7 @@ def _routes():
             return RedirectResponse(f"/incidents/{incident_id}?error=" + quote(str(exc)), status_code=303)
         status = str(result.get("status") or "")
         if status not in {"blocked", "already-blocked"}:
-            reason = str(result.get("reason") or status or "the function did not write the policy")
+            reason = str(result.get("reason") or status or "the block service did not write the policy")
             return RedirectResponse(f"/incidents/{incident_id}?error=" + quote(reason[:300]), status_code=303)
         message = "The address is on SentinelAutoBlock." if status == "blocked" else "The address was already on SentinelAutoBlock."
         if result.get("notify_error"):
@@ -555,7 +580,7 @@ def _edit_block(request: Request, address: str, operation: str):
     elif operation == "remove" and status == "not-listed":
         message = f"{shown} is not on a block list."
     else:
-        reason = str(result.get("reason") or status or "the function did not change the block list")
+        reason = str(result.get("reason") or status or "the block service did not change the block list")
         return RedirectResponse("/blocks?error=" + quote(reason[:300]), status_code=303)
     if result.get("notify_error"):
         message += " The Teams notification was not delivered."
