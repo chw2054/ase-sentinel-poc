@@ -26,12 +26,43 @@ from app.ops import OpsError
 
 INCIDENT_API = "2024-03-01"
 POLICY_API = "2024-05-01"
+MATCH_VALUES_PER_POLICY = 600
 DECISION_ROLES = frozenset({"admin", "operator", "approver"})
 TEMPLATES = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
 
 
 class AzureCallError(Exception):
     """A Sentinel, WAF, or function call failed. The message never includes a key."""
+
+
+@dataclass(frozen=True)
+class GatewayView:
+    name: str
+    url: str
+
+
+@dataclass(frozen=True)
+class PolicyView:
+    name: str
+    resource_id: str
+    tagged: bool
+    values: tuple[str, ...]
+    gateways: tuple[GatewayView, ...]
+
+
+@dataclass(frozen=True)
+class Inventory:
+    sentinel_name: str
+    sentinel_id: str
+    policies: tuple[PolicyView, ...]
+    gateway_error: str = ""
+
+    @property
+    def addresses(self) -> set[str]:
+        found: set[str] = set()
+        for policy in self.policies:
+            found.update(policy.values)
+        return found
 
 
 @dataclass(frozen=True)
@@ -108,27 +139,139 @@ class SentinelAzure:
                 found.append(host)
         return tuple(found)
 
+    def inventory(self) -> Inventory:
+        settings = self.settings
+        sentinel_id = (
+            "/subscriptions/"
+            + settings.subscription_id
+            + "/resourceGroups/"
+            + settings.resource_group
+            + "/providers/Microsoft.OperationalInsights/workspaces/"
+            + settings.workspace_name
+        )
+        documents = self._policy_documents()
+        chosen = []
+        seen: set[str] = set()
+        for document in documents:
+            resource_id = str(document.get("id") or settings.waf_policy_id)
+            key = resource_id.casefold()
+            if key in seen:
+                continue
+            tagged = _has_tag(document.get("tags"), settings.block_policy_tag)
+            configured = key == settings.waf_policy_id.casefold()
+            if not tagged and not configured:
+                continue
+            seen.add(key)
+            chosen.append(
+                PolicyView(
+                    name=str(document.get("name") or resource_id.rsplit("/", 1)[-1]),
+                    resource_id=resource_id,
+                    tagged=tagged,
+                    values=_match_values(document, settings.block_rule_name),
+                    gateways=(),
+                )
+            )
+        if settings.waf_policy_id.casefold() not in seen:
+            chosen.insert(
+                0,
+                PolicyView(
+                    name=settings.waf_policy_id.rsplit("/", 1)[-1],
+                    resource_id=settings.waf_policy_id,
+                    tagged=False,
+                    values=_match_values(self._policy(settings.waf_policy_id), settings.block_rule_name),
+                    gateways=(),
+                ),
+            )
+        gateway_error = ""
+        try:
+            gateways = self._gateways()
+        except AzureCallError as exc:
+            gateways = []
+            gateway_error = str(exc)
+        attached = []
+        for policy in chosen:
+            matched = tuple(gateway for gateway in gateways if gateway[0].casefold() == policy.resource_id.casefold())
+            attached.append(
+                PolicyView(
+                    policy.name,
+                    policy.resource_id,
+                    policy.tagged,
+                    policy.values,
+                    tuple(GatewayView(name, url) for _policy_id, name, url in matched),
+                )
+            )
+        return Inventory(settings.workspace_name, sentinel_id, tuple(attached), gateway_error)
+
     def block_values(self) -> tuple[str, ...]:
+        return tuple(sorted(self.inventory().addresses))
+
+    def _policy_documents(self) -> list[dict]:
+        try:
+            document = self._arm(
+                "GET",
+                self._collection("Microsoft.Network/applicationGatewayWebApplicationFirewallPolicies"),
+                params={"api-version": POLICY_API},
+            )
+        except AzureCallError:
+            return [self._policy(self.settings.waf_policy_id)]
+        values = document.get("value")
+        if not isinstance(values, list):
+            return [self._policy(self.settings.waf_policy_id)]
+        return [item for item in values if isinstance(item, dict)]
+
+    def _policy(self, resource_id: str) -> dict:
+        document = self._arm("GET", "https://management.azure.com" + resource_id, params={"api-version": POLICY_API})
+        document.setdefault("id", resource_id)
+        document.setdefault("name", resource_id.rsplit("/", 1)[-1])
+        return document
+
+    def _gateways(self) -> list[tuple[str, str, str]]:
         document = self._arm(
             "GET",
-            "https://management.azure.com" + self.settings.waf_policy_id + "?api-version=" + POLICY_API,
+            self._collection("Microsoft.Network/applicationGateways"),
+            params={"api-version": POLICY_API},
         )
-        rules = (document.get("properties") or {}).get("customRules")
-        if rules is None:
-            return ()
-        if not isinstance(rules, list):
-            raise AzureCallError("WAF customRules is not an array")
-        for rule in rules:
-            if not isinstance(rule, dict) or rule.get("name") != self.settings.block_rule_name:
+        found = []
+        for gateway in document.get("value") or []:
+            if not isinstance(gateway, dict):
                 continue
-            conditions = rule.get("matchConditions") or []
-            if not conditions or not isinstance(conditions[0], dict):
-                return ()
-            values = conditions[0].get("matchValues") or []
-            if not isinstance(values, list):
-                raise AzureCallError("matchValues is not an array")
-            return tuple(item for item in values if isinstance(item, str))
-        return ()
+            properties = gateway.get("properties") or {}
+            policy_id = str((properties.get("firewallPolicy") or {}).get("id") or "")
+            if not policy_id:
+                continue
+            name = str(gateway.get("name") or "gateway")
+            for address in self._gateway_addresses(properties):
+                found.append((policy_id, name, "http://" + address))
+        return found
+
+    def _gateway_addresses(self, properties: dict) -> list[str]:
+        addresses = []
+        for item in properties.get("frontendIPConfigurations") or []:
+            if not isinstance(item, dict):
+                continue
+            public_id = (item.get("publicIPAddress") or {}).get("id")
+            if not isinstance(public_id, str) or not public_id.startswith("/"):
+                continue
+            address = self._public_address(public_id)
+            if address and address not in addresses:
+                addresses.append(address)
+        return addresses
+
+    def _public_address(self, resource_id: str) -> str:
+        document = self._arm("GET", "https://management.azure.com" + resource_id, params={"api-version": POLICY_API})
+        address = (document.get("properties") or {}).get("ipAddress")
+        return address if isinstance(address, str) else ""
+
+    def _collection(self, provider: str) -> str:
+        settings = self.settings
+        return (
+            "https://management.azure.com/subscriptions/"
+            + quote(settings.subscription_id, safe="")
+            + "/resourceGroups/"
+            + quote(settings.resource_group, safe="")
+            + "/providers/"
+            + provider
+        )
 
     def enforce(self, incident: LiveIncident) -> dict:
         if not incident.ips:
@@ -269,22 +412,38 @@ def _routes():
             return RedirectResponse("/login", status_code=303)
         try:
             incidents = request.app.state.azure.list_open()
-            blocked = set(request.app.state.azure.block_values())
+            inventory = request.app.state.azure.inventory()
         except AzureCallError as exc:
-            return _render(request, "live_home.html", rows=[], pending=0, blocks=0, load_error=str(exc))
+            return _render(request, "live_home.html", rows=[], pending=0, blocks=0, inventory=None, load_error=str(exc))
+        blocked = inventory.addresses
         rows = [_row(item, blocked) for item in incidents]
         pending = sum(1 for row in rows if not row["on_block_list"])
-        return _render(request, "live_home.html", rows=rows, pending=pending, blocks=len(blocked), load_error="")
+        return _render(
+            request,
+            "live_home.html",
+            rows=rows,
+            pending=pending,
+            blocks=len(blocked),
+            inventory=inventory,
+            load_error="",
+        )
 
     @ui.get("/incidents/{incident_id}")
     def incident_detail(request: Request, incident_id: str):
         if principal_from_request(request) is None:
             return RedirectResponse("/login", status_code=303)
         if not _guid(incident_id):
-            return _render(request, "live_incident.html", incident=None, on_block_list=False, can_decide=False)
+            return _render(
+                request,
+                "live_incident.html",
+                incident=None,
+                on_block_list=False,
+                can_decide=False,
+                inventory=None,
+            )
         try:
             incident = request.app.state.azure.get(incident_id)
-            blocked = set(request.app.state.azure.block_values())
+            inventory = request.app.state.azure.inventory()
         except AzureCallError as exc:
             return _render(
                 request,
@@ -292,6 +451,7 @@ def _routes():
                 incident=None,
                 on_block_list=False,
                 can_decide=False,
+                inventory=None,
                 load_error=str(exc),
             )
         actor = principal_from_request(request)
@@ -299,8 +459,9 @@ def _routes():
             request,
             "live_incident.html",
             incident=incident,
-            on_block_list=bool(incident.ips) and set(incident.ips) <= blocked,
+            on_block_list=bool(incident.ips) and set(incident.ips) <= inventory.addresses,
             can_decide=actor is not None and bool(actor.roles & DECISION_ROLES),
+            inventory=inventory,
             load_error="",
         )
 
@@ -344,10 +505,10 @@ def _routes():
         if principal_from_request(request) is None:
             return RedirectResponse("/login", status_code=303)
         try:
-            values = request.app.state.azure.block_values()
+            inventory = request.app.state.azure.inventory()
         except AzureCallError as exc:
-            return _render(request, "live_blocks.html", values=(), load_error=str(exc))
-        return _render(request, "live_blocks.html", values=values, load_error="")
+            return _render(request, "live_blocks.html", inventory=None, load_error=str(exc))
+        return _render(request, "live_blocks.html", inventory=inventory, load_error="")
 
     return ui
 
@@ -371,7 +532,7 @@ def _render(request: Request, name: str, **extra):
             "message": request.query_params.get("message", ""),
             "error": request.query_params.get("error", ""),
             "live": True,
-            "cap": request.app.state.settings.product_cap,
+            "per_policy": MATCH_VALUES_PER_POLICY,
             **extra,
         },
     )
@@ -418,6 +579,29 @@ def _with_ips(incident: LiveIncident, ips: tuple[str, ...]) -> LiveIncident:
         incident.arm_id,
         ips,
     )
+
+
+def _has_tag(tags: object, key: str) -> bool:
+    if not isinstance(tags, dict) or not key:
+        return False
+    return any(str(name).casefold() == key.casefold() and str(value).lower() in {"true", "1", "yes"} for name, value in tags.items())
+
+
+def _match_values(document: dict, rule_name: str) -> tuple[str, ...]:
+    rules = (document.get("properties") or {}).get("customRules")
+    if not isinstance(rules, list):
+        return ()
+    for rule in rules:
+        if not isinstance(rule, dict) or rule.get("name") != rule_name:
+            continue
+        conditions = rule.get("matchConditions") or []
+        if not conditions or not isinstance(conditions[0], dict):
+            return ()
+        values = conditions[0].get("matchValues") or []
+        if not isinstance(values, list):
+            raise AzureCallError("matchValues is not an array")
+        return tuple(item for item in values if isinstance(item, str))
+    return ()
 
 
 def _host(value: object) -> str:

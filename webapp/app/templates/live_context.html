@@ -1,0 +1,19 @@
+{% if inventory %}
+<section class="context">
+  <p>Sentinel <strong>{{ inventory.sentinel_name }}</strong></p>
+  <p>{{ inventory.sentinel_id }}</p>
+  {% for policy in inventory.policies %}
+  <p>WAF <strong>{{ policy.name }}</strong> — {{ policy.values | length }} / {{ per_policy }}
+    {% if policy.tagged %}tagged {{ policy.resource_id }}{% else %}configured policy, tag not set{% endif %}
+  </p>
+  {% for gateway in policy.gateways %}
+  <p>Application Gateway <strong>{{ gateway.name }}</strong> <a href="{{ gateway.url }}">{{ gateway.url }}</a></p>
+  {% else %}
+  <p>No Application Gateway uses {{ policy.name }}.</p>
+  {% endfor %}
+  {% else %}
+  <p>No block-list WAF policy was found.</p>
+  {% endfor %}
+  {% if inventory.gateway_error %}<p class="error">{{ inventory.gateway_error }}</p>{% endif %}
+</section>
+{% endif %}

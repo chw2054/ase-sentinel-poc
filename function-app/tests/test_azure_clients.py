@@ -118,6 +118,51 @@ def test_get_reports_timeout_after_the_retries_are_exhausted() -> None:
     assert session.calls == 3
 
 
+def test_tagged_policy_ids_keep_only_the_block_list_tag() -> None:
+    primary = (
+        "/subscriptions/sub/resourceGroups/rg/providers/Microsoft.Network/"
+        "applicationGatewayWebApplicationFirewallPolicies/waf"
+    )
+    second = primary + "-2"
+    other = primary + "-other"
+
+    class _Listing:
+        def __init__(self) -> None:
+            self.calls: list[dict[str, object]] = []
+
+        def request(self, method: str, url: str, params=None, json=None, headers=None, timeout=None):
+            self.calls.append({"method": method, "url": url, "params": params})
+            return _Response(
+                200,
+                {
+                    "value": [
+                        {"id": primary, "tags": {"ase-sentinel-block-list": "true"}},
+                        {"id": second, "tags": {"ASE-SENTINEL-BLOCK-LIST": "Yes"}},
+                        {"id": other, "tags": {"env": "poc"}},
+                        {"id": primary + "-off", "tags": {"ase-sentinel-block-list": "false"}},
+                        {"name": "missing-id", "tags": {"ase-sentinel-block-list": "true"}},
+                    ]
+                },
+            )
+
+    session = _Listing()
+    client = ArmWafClient(credential=_Credential(), session=session)
+    assert client.tagged_policy_ids("not-an-id", "2024-05-01") == []
+    assert session.calls == []
+    found = client.tagged_policy_ids(primary, "2024-05-01")
+    assert found == [primary, second]
+    assert session.calls[0]["method"] == "GET"
+    assert str(session.calls[0]["url"]).endswith(
+        "/resourceGroups/rg/providers/Microsoft.Network/applicationGatewayWebApplicationFirewallPolicies"
+    )
+    assert session.calls[0]["params"] == {"api-version": "2024-05-01"}
+    assert "super-secret-token" not in str(found)
+
+    denied = ArmWafClient(credential=_Credential(), session=_Session(response=_Response(403, {})))
+    with pytest.raises(WafGetError, match="HTTP 403"):
+        denied.tagged_policy_ids(primary, "2024-05-01")
+
+
 def test_accepted_put_is_not_success() -> None:
     client = ArmWafClient(credential=_Credential(), session=_Session(response=_Response(202, {})))
     with pytest.raises(WafPutError, match="did not finish"):

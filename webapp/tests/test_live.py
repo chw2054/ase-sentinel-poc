@@ -18,6 +18,13 @@ POLICY_ID = (
     "/subscriptions/sub/resourceGroups/rg/providers/Microsoft.Network/"
     "applicationGatewayWebApplicationFirewallPolicies/wafpol"
 )
+SECOND_POLICY_ID = POLICY_ID + "-2"
+OTHER_POLICY_ID = POLICY_ID + "-other"
+WORKSPACE = "log-ase-sentinel-poc-7ttpll74bmhiq"
+SENTINEL_ID = (
+    "/subscriptions/sub/resourceGroups/rg/providers/Microsoft.OperationalInsights/"
+    "workspaces/" + WORKSPACE
+)
 
 
 def settings() -> Settings:
@@ -30,7 +37,7 @@ def settings() -> Settings:
         live_azure=True,
         subscription_id="sub",
         resource_group="rg",
-        workspace_name="ws",
+        workspace_name=WORKSPACE,
         waf_policy_id=POLICY_ID,
         function_url="https://fn.example/api/SentinelWafAutoBlock",
         function_key="test-key",
@@ -66,20 +73,84 @@ def transport(calls: list[httpx.Request]) -> httpx.MockTransport:
                 200,
                 json={"entities": [{"kind": "Ip", "properties": {"address": "203.0.113.9"}}]},
             )
-        if "applicationGatewayWebApplicationFirewallPolicies" in url:
+        path = url.split("?", 1)[0]
+        if path.endswith("applicationGatewayWebApplicationFirewallPolicies"):
             return httpx.Response(
                 200,
                 json={
-                    "properties": {
-                        "customRules": [
-                            {
-                                "name": "SentinelAutoBlock",
-                                "matchConditions": [{"matchValues": ["198.51.100.4"]}],
-                            }
-                        ]
-                    }
+                    "value": [
+                        {
+                            "id": POLICY_ID,
+                            "name": "wafpol-ase-sentinel-poc",
+                            "tags": {"ase-sentinel-block-list": "true"},
+                            "properties": {
+                                "customRules": [
+                                    {
+                                        "name": "SentinelAutoBlock",
+                                        "matchConditions": [{"matchValues": ["198.51.100.4"]}],
+                                    }
+                                ]
+                            },
+                        },
+                        {
+                            "id": OTHER_POLICY_ID,
+                            "name": "wafpol-other",
+                            "tags": {"env": "poc"},
+                            "properties": {
+                                "customRules": [
+                                    {
+                                        "name": "SentinelAutoBlock",
+                                        "matchConditions": [{"matchValues": ["203.0.113.50"]}],
+                                    }
+                                ]
+                            },
+                        },
+                        {
+                            "id": SECOND_POLICY_ID,
+                            "name": "wafpol-ase-sentinel-poc-2",
+                            "tags": {"ASE-SENTINEL-BLOCK-LIST": "Yes"},
+                            "properties": {
+                                "customRules": [
+                                    {
+                                        "name": "SentinelAutoBlock",
+                                        "matchConditions": [{"matchValues": ["198.51.100.8"]}],
+                                    }
+                                ]
+                            },
+                        },
+                    ]
                 },
             )
+        if path.endswith("applicationGateways"):
+            return httpx.Response(
+                200,
+                json={
+                    "value": [
+                        {
+                            "name": "agw-ase-sentinel-poc",
+                            "properties": {
+                                "firewallPolicy": {"id": POLICY_ID},
+                                "frontendIPConfigurations": [
+                                    {"publicIPAddress": {"id": "/subscriptions/sub/resourceGroups/rg/providers/Microsoft.Network/publicIPAddresses/pip"}}
+                                ],
+                            },
+                        },
+                        {
+                            "name": "agw-ase-sentinel-poc-2",
+                            "properties": {
+                                "firewallPolicy": {"id": SECOND_POLICY_ID},
+                                "frontendIPConfigurations": [
+                                    {"publicIPAddress": {"id": "/subscriptions/sub/resourceGroups/rg/providers/Microsoft.Network/publicIPAddresses/pip-2"}}
+                                ],
+                            },
+                        },
+                    ]
+                },
+            )
+        if path.endswith("/publicIPAddresses/pip"):
+            return httpx.Response(200, json={"properties": {"ipAddress": "20.169.234.86"}})
+        if path.endswith("/publicIPAddresses/pip-2"):
+            return httpx.Response(200, json={"properties": {"ipAddress": "20.240.1.2"}})
         if request.method == "GET" and url.endswith(f"/{INCIDENT_ID}?api-version=2024-03-01"):
             return httpx.Response(200, json=_incident_body())
         if request.method == "PUT" and "/comments/" in url:
@@ -115,6 +186,27 @@ def test_home_lists_the_sentinel_incident_and_skips_sql() -> None:
     assert "203.0.113.9" in page.text
     assert "Not blocked" in page.text
     assert "1 still need a decision" in page.text
+    assert "2 addresses are on the block list" in page.text
+    assert f"Sentinel <strong>{WORKSPACE}</strong>" in page.text
+    assert SENTINEL_ID in page.text
+    assert ">wafpol-ase-sentinel-poc</strong>" in page.text
+    assert ">wafpol-ase-sentinel-poc-2</strong>" in page.text
+    assert "wafpol-other" not in page.text
+    assert "http://20.169.234.86" in page.text
+    assert "http://20.240.1.2" in page.text
+    assert ">agw-ase-sentinel-poc</strong>" in page.text
+    assert ">agw-ase-sentinel-poc-2</strong>" in page.text
+    assert "1 / 600" in page.text
+    blocks = api.get("/blocks")
+    assert blocks.status_code == 200
+    assert "198.51.100.4" in blocks.text
+    assert "198.51.100.8" in blocks.text
+    assert "203.0.113.50" not in blocks.text
+    assert "http://20.169.234.86" in blocks.text
+    detail = api.get(f"/incidents/{INCIDENT_ID}")
+    assert detail.status_code == 200
+    assert WORKSPACE in detail.text
+    assert "http://20.169.234.86" in detail.text
     listed = [call for call in calls if call.method == "GET" and "/incidents?" in str(call.url)]
     assert listed and "api-version=2024-03-01" in str(listed[0].url)
     assert not any("webapp-data" in str(call.url) for call in calls)

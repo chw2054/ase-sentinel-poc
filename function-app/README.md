@@ -66,17 +66,18 @@ Environment variables are the alternative. `AUTO_BLOCK_ENABLED`, `OVERRIDE_PROTE
 
 | Setting | Default |
 | --- | --- |
-| `wafPolicyResourceId` | required ARM id of the one policy |
+| `wafPolicyResourceId` | required ARM id of the configured policy |
 | `wafProvider` | `ApplicationGateway` or `FrontDoor` |
 | `protectedIpRanges` | `[]` |
-| `maximumBlockEntries` | `100` |
+| `maximumBlockEntries` | `100`, still parsed, no longer the block-list ceiling |
+| `BLOCK_POLICY_TAG` | `ase-sentinel-block-list` |
 | `autoBlockEnabled` | `true` in `config.example.json` and in the deployed app. A missing setting stays `false` |
 | `overrideProtectedRanges` | `false` |
 | `blockRuleName` | `SentinelAutoBlock` |
 | `blockRulePriority` | `10` |
 | `armApiVersion` | `2024-05-01` for Application Gateway, `2024-02-01` for Front Door |
 
-`maximumBlockEntries` is the product cap. Application Gateway also has a platform cap of 600 addresses per IPMatch condition on the OWASP 3.2 policy used by this POC. This package does not raise the configured cap to 600.
+Each IPMatch condition holds 600 addresses. `maximumBlockEntries` is no longer that ceiling. A WAF policy tagged `ase-sentinel-block-list=true` is another block list; the function fills the configured policy first and then a tagged policy that still has room.
 
 ## Local testing
 
@@ -107,11 +108,11 @@ Built-in networks always apply unless `overrideProtectedRanges` is JSON `true`:
 
 Customer `protectedIpRanges` accept an IPv4 host or `/8`, `/16`, `/24`, `/32`. Other prefix lengths fail closed before any `Would block IP:` line, including `/12`, `/10`, and `/40`. A single address matches that host only. Any other entry fails closed.
 
-Incident values are single hosts. Empty text, whitespace, commas, slashes, zone ids, and any text that is not a canonical dotted IPv4 address are rejected with `invalid IPv4` or `empty, CIDR, or whitespace`. They are not repaired, not added to `matchValues` or `matchValue`, and not counted toward `maximumBlockEntries`. The comment lists them under rejected addresses and does not say `Would block IP:` or `Blocked IP:` for them. When the incident has no IPv4 address, the workload does not GET the policy. A mixed incident updates the IPv4 addresses and still records the rejection.
+Incident values are single hosts. Empty text, whitespace, commas, slashes, zone ids, and any text that is not a canonical dotted IPv4 address are rejected with `invalid IPv4` or `empty, CIDR, or whitespace`. They are not repaired, not added to `matchValues` or `matchValue`, and not counted toward the 600 addresses on a policy. The comment lists them under rejected addresses and does not say `Would block IP:` or `Blocked IP:` for them. When the incident has no IPv4 address, the workload does not GET the policy. A mixed incident updates the IPv4 addresses and still records the rejection.
 
 ## Opaque match values and PUT bodies
 
-Values already stored on the named rule are copied in order as exact strings. They are not parsed or rewritten. A stored string still counts toward `maximumBlockEntries`. The workload does not delete that stored value to make the PUT succeed. The failure, if the provider rejects it, is reported.
+Values already stored on the named rule are copied in order as exact strings. They are not parsed or rewritten. A stored string still counts toward the 600 addresses on that policy. The workload does not delete that stored value to make the PUT succeed. The failure, if the provider rejects it, is reported.
 
 Application Gateway PUT sends `location`, `tags`, `properties.policySettings`, `properties.customRules`, and `properties.managedRules`. It does not send `sku`, `id`, `etag`, or read-only links. The match condition uses the ARM spelling `negationConditon`. API `2024-05-01` rejects `negationCondition`.
 

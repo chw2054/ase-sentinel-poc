@@ -32,6 +32,7 @@ class Settings:
     waf_policy_id: str = ""
     function_url: str = ""
     function_key: str = ""
+    block_policy_tag: str = "ase-sentinel-block-list"
 
     @classmethod
     def from_env(cls) -> Settings:
@@ -64,6 +65,7 @@ class Settings:
             waf_policy_id=os.environ.get("WAF_POLICY_RESOURCE_ID", ""),
             function_url=os.environ.get("BLOCK_FUNCTION_URL", ""),
             function_key=os.environ.get("BLOCK_FUNCTION_KEY", ""),
+            block_policy_tag=os.environ.get("BLOCK_POLICY_TAG", "ase-sentinel-block-list"),
         )
 
     def validate(self) -> None:

@@ -6,6 +6,8 @@ import html
 
 from sentinel_waf_block.models import (
     APPLICATION_GATEWAY,
+    BLOCK_POLICY_TAG,
+    MATCH_VALUES_PER_POLICY,
     STATUS_ALREADY_BLOCKED,
     STATUS_BLOCKED,
     STATUS_CAPACITY,
@@ -43,14 +45,14 @@ def render(result: Result, incident: Incident, config: Config) -> str:
                 "<p>Provider: "
                 f"{provider}. Policy: {policy}. Custom rule that would be updated: {rule}. "
                 "Resulting list size if blocking were enabled: "
-                f"{size} of {config.maximum_block_entries}.</p>"
+                f"{size} of {MATCH_VALUES_PER_POLICY} on this policy.</p>"
             )
         else:
             kind = "variable" if config.waf_provider == APPLICATION_GATEWAY else "matchVariable"
             parts.append(
                 f"<p>Custom rule {rule}, {kind} RemoteAddr, operator IPMatch, action Block, "
                 f"priority {config.block_rule_priority}. List size {size} of "
-                f"{config.maximum_block_entries}. Other custom rules were kept. "
+                f"{MATCH_VALUES_PER_POLICY} on this policy. Other custom rules were kept. "
                 f"Policy: {policy}.</p>"
             )
             if config.waf_provider == APPLICATION_GATEWAY:
@@ -108,7 +110,9 @@ def _headline(
     if status == STATUS_CAPACITY:
         return (
             "<p><strong>ASE POC playbook refused to block.</strong> "
-            "The merged list would exceed maximumBlockEntries. The WAF policy was not changed.</p>"
+            f"Every block policy already holds {MATCH_VALUES_PER_POLICY} addresses. "
+            f"Tag another WAF policy {BLOCK_POLICY_TAG}=true to extend the list. "
+            "The WAF policy was not changed.</p>"
         )
     if status == STATUS_RANGES:
         values = html.escape(", ".join(result.invalid_protected_ranges), quote=False)

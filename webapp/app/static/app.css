@@ -13,6 +13,8 @@ main { max-width: 980px; }
 table { width: 100%; border-collapse: collapse; }
 td, th { text-align: left; padding: 0.35rem; border-bottom: 1px solid #eee; vertical-align: top; }
 .banner { background: #fff7ed; border: 1px solid #fdba74; padding: 0.6rem 0.8rem; }
+.context { background: white; border: 1px solid #ddd; padding: 0.8rem 1rem; margin: 0 0 1rem; }
+.context p { margin: 0.25rem 0; }
 .error { background: #fef2f2; border: 1px solid #fca5a5; padding: 0.6rem 0.8rem; }
 .ok { background: #ecfdf5; border: 1px solid #6ee7b7; padding: 0.6rem 0.8rem; }
 button, input, select { font: inherit; }

@@ -211,10 +211,9 @@ def test_engine_notifies_put_failure_and_keeps_the_status() -> None:
 
 def test_engine_notifies_capacity() -> None:
     notifier = FakeNotifier()
-    document = agw_policy(agw_block_rule(["198.51.100.8"]))
+    full = [f"198.51.{index // 256}.{index % 256}" for index in range(1, 601)]
+    document = agw_policy(agw_block_rule(full))
     app = Engine(FakeWaf(document), None, notifier)
-    result = app.execute(
-        incident("203.0.113.5"), config(maximum_block_entries=1, auto_block_enabled=True)
-    )
+    result = app.execute(incident("203.0.113.5"), config(auto_block_enabled=True))
     assert result.status == "capacity-exceeded"
     assert [event for event, _result in notifier.calls] == [EVENT_CAPACITY]

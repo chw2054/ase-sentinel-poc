@@ -9,6 +9,9 @@ from typing import Any
 APPLICATION_GATEWAY = "ApplicationGateway"
 FRONT_DOOR = "FrontDoor"
 PROVIDERS = frozenset({APPLICATION_GATEWAY, FRONT_DOOR})
+# One IPMatch condition holds 600 values. Another policy with this tag extends the list.
+MATCH_VALUES_PER_POLICY = 600
+BLOCK_POLICY_TAG = "ase-sentinel-block-list"
 
 STATUS_DRY_RUN = "dry-run"
 STATUS_BLOCKED = "blocked"
@@ -74,6 +77,7 @@ class Result:
     comment: str = ""
     comment_error: str = ""
     notify_error: str = ""
+    policy_resource_id: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         body: dict[str, Any] = {
@@ -91,6 +95,7 @@ class Result:
             "comment": self.comment,
             "comment_error": self.comment_error,
             "notify_error": self.notify_error,
+            "policy_resource_id": self.policy_resource_id,
         }
         return body
 

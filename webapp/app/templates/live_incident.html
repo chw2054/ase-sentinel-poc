@@ -1,6 +1,7 @@
 {% extends "base.html" %}
 {% block body %}
 {% if load_error %}<p class="error">{{ load_error }}</p>{% endif %}
+{% include "live_context.html" %}
 {% if incident is none %}
 <p>Incident not found.</p>
 {% else %}

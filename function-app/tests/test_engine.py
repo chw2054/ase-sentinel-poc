@@ -191,22 +191,73 @@ def test_existing_match_strings_are_copied_and_other_rules_stay() -> None:
     assert body["properties"]["managedRules"]["managedRuleSets"][0]["ruleSetVersion"] == "3.2"
 
 
+def _full_policy() -> list[str]:
+    return [f"198.51.{index // 256}.{index % 256}" for index in range(1, 601)]
+
+
 def test_capacity_counts_existing_values_and_rejects_non_ipv4() -> None:
-    document = agw_policy(agw_block_rule(["198.51.100.8"]))
+    document = agw_policy(agw_block_rule(_full_policy()))
     app, waf, _comments = engine(FakeWaf(document))
     result = app.execute(
         incident("203.0.113.5", "2001:db9::1"),
-        config(maximum_block_entries=1, auto_block_enabled=True),
+        config(auto_block_enabled=True),
     )
     assert result.status == "capacity-exceeded"
-    assert result.existing_count == 1
-    assert result.resulting_count == 2
+    assert result.existing_count == 600
+    assert result.resulting_count == 601
     assert result.new_addresses == ("203.0.113.5",)
     assert result.rejected_addresses[0].reason == REASON_INVALID_V4
     assert result.changed is False
     assert waf.puts == []
     assert "203.0.113.5" in result.reason
     assert "Blocked IP:" not in result.comment
+
+
+def test_full_policy_writes_the_next_tagged_policy() -> None:
+    primary = config().waf_policy_resource_id
+    second = primary + "-2"
+    full = agw_policy(agw_block_rule(_full_policy()))
+    empty = agw_policy(agw_block_rule([]))
+
+    class _Split(FakeWaf):
+        def __init__(self) -> None:
+            super().__init__(full)
+            self.docs = {primary: full, second: empty}
+            self.written: list[str] = []
+
+        def get_policy(self, resource_id: str, api_version: str) -> dict:
+            self.gets.append((resource_id, api_version))
+            return copy.deepcopy(self.docs[resource_id])
+
+        def tagged_policy_ids(self, policy_resource_id: str, api_version: str) -> list[str]:
+            return [second]
+
+        def put_policy(self, resource_id: str, api_version: str, body: dict, timeout_seconds: float = 120) -> None:
+            self.written.append(resource_id)
+            self.puts.append(body)
+
+    waf = _Split()
+    app, _waf, _comments = engine(waf)
+    result = app.execute(incident("203.0.113.5"), config(auto_block_enabled=True))
+    assert result.status == "blocked"
+    assert result.policy_resource_id == second
+    assert waf.written == [second]
+    values = waf.puts[0]["properties"]["customRules"][0]["matchConditions"][0]["matchValues"]
+    assert values == ["203.0.113.5"]
+
+
+def test_tag_lookup_failure_still_writes_the_configured_policy() -> None:
+    class _Blind(FakeWaf):
+        def tagged_policy_ids(self, policy_resource_id: str, api_version: str) -> list[str]:
+            raise WafGetError("GET failed with HTTP 403")
+
+    waf = _Blind(agw_policy(probe_rule()))
+    app, _waf, _comments = engine(waf)
+    result = app.execute(incident("203.0.113.5"), config(auto_block_enabled=True))
+    assert result.status == "blocked"
+    assert result.policy_resource_id == config().waf_policy_resource_id
+    assert waf.gets == [(config().waf_policy_resource_id, "2024-05-01")]
+    assert len(waf.puts) == 1
 
 
 def test_get_failure_has_no_would_block_line() -> None:
