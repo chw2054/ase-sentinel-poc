@@ -249,7 +249,9 @@ class SentinelAzure:
         for item in properties.get("frontendIPConfigurations") or []:
             if not isinstance(item, dict):
                 continue
-            public_id = (item.get("publicIPAddress") or {}).get("id")
+            nested = item.get("properties") if isinstance(item.get("properties"), dict) else {}
+            public = nested.get("publicIPAddress") or item.get("publicIPAddress") or {}
+            public_id = public.get("id") if isinstance(public, dict) else None
             if not isinstance(public_id, str) or not public_id.startswith("/"):
                 continue
             address = self._public_address(public_id)

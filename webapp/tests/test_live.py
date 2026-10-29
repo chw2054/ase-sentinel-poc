@@ -131,7 +131,14 @@ def transport(calls: list[httpx.Request]) -> httpx.MockTransport:
                             "properties": {
                                 "firewallPolicy": {"id": POLICY_ID},
                                 "frontendIPConfigurations": [
-                                    {"publicIPAddress": {"id": "/subscriptions/sub/resourceGroups/rg/providers/Microsoft.Network/publicIPAddresses/pip"}}
+                                    {
+                                        "name": "frontendPublic",
+                                        "properties": {
+                                            "publicIPAddress": {
+                                                "id": "/subscriptions/sub/resourceGroups/rg/providers/Microsoft.Network/publicIPAddresses/pip"
+                                            }
+                                        },
+                                    }
                                 ],
                             },
                         },
@@ -140,7 +147,14 @@ def transport(calls: list[httpx.Request]) -> httpx.MockTransport:
                             "properties": {
                                 "firewallPolicy": {"id": SECOND_POLICY_ID},
                                 "frontendIPConfigurations": [
-                                    {"publicIPAddress": {"id": "/subscriptions/sub/resourceGroups/rg/providers/Microsoft.Network/publicIPAddresses/pip-2"}}
+                                    {
+                                        "name": "frontendPublic",
+                                        "properties": {
+                                            "publicIPAddress": {
+                                                "id": "/subscriptions/sub/resourceGroups/rg/providers/Microsoft.Network/publicIPAddresses/pip-2"
+                                            }
+                                        },
+                                    }
                                 ],
                             },
                         },
