@@ -72,6 +72,52 @@ def test_credential_failure_does_not_keep_the_token_in_the_chain() -> None:
     assert "super-secret-token" not in rendered
 
 
+def test_get_retries_a_timeout_then_returns_the_policy() -> None:
+    class _ConnectTimeout(Exception):
+        pass
+
+    class _Flaky:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def request(self, method: str, url: str, params=None, json=None, headers=None, timeout=None):
+            self.calls += 1
+            if self.calls == 1:
+                raise _ConnectTimeout()
+            return _Response(200, {"name": "waf"})
+
+    session = _Flaky()
+    client = ArmWafClient(credential=_Credential(), session=session)
+    document = client.get_policy(
+        "/subscriptions/sub/resourceGroups/rg/providers/Microsoft.Network/applicationGatewayWebApplicationFirewallPolicies/waf",
+        "2024-05-01",
+    )
+    assert document == {"name": "waf"}
+    assert session.calls == 2
+
+
+def test_get_reports_timeout_after_the_retries_are_exhausted() -> None:
+    class _ReadTimeout(Exception):
+        pass
+
+    class _Always:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def request(self, method: str, url: str, params=None, json=None, headers=None, timeout=None):
+            self.calls += 1
+            raise _ReadTimeout()
+
+    session = _Always()
+    client = ArmWafClient(credential=_Credential(), session=session)
+    with pytest.raises(WafGetError, match="GET timed out"):
+        client.get_policy(
+            "/subscriptions/sub/resourceGroups/rg/providers/Microsoft.Network/applicationGatewayWebApplicationFirewallPolicies/waf",
+            "2024-05-01",
+        )
+    assert session.calls == 3
+
+
 def test_accepted_put_is_not_success() -> None:
     client = ArmWafClient(credential=_Credential(), session=_Session(response=_Response(202, {})))
     with pytest.raises(WafPutError, match="did not finish"):

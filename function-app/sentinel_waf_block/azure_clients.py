@@ -13,6 +13,13 @@ from sentinel_waf_block.engine import AuthenticationError, CommentError, WafGetE
 _ARM = "https://management.azure.com"
 _SCOPE = "https://management.azure.com/.default"
 _COMMENT_API = "2024-01-01-preview"
+# A cold Flex Consumption worker can leave the first TCP connection to ARM
+# hanging until the client gives up. The playbook stops at two minutes, so a
+# single 120-second read never returns a body the playbook can use. GET is
+# safe to repeat. PUT is not: a timed-out write may already have been applied.
+_CONNECT_TIMEOUT_SECONDS = 10.0
+_GET_READ_TIMEOUT_SECONDS = 20.0
+_GET_ATTEMPTS = 3
 
 
 class ArmWafClient:
@@ -21,7 +28,15 @@ class ArmWafClient:
         self._session = session
 
     def get_policy(self, resource_id: str, api_version: str) -> object:
-        response = self._request("GET", resource_id, api_version, None, WafGetError)
+        response = self._request(
+            "GET",
+            resource_id,
+            api_version,
+            None,
+            WafGetError,
+            timeout_seconds=_GET_READ_TIMEOUT_SECONDS,
+            attempts=_GET_ATTEMPTS,
+        )
         if response.status_code != 200:
             raise WafGetError(f"GET failed with HTTP {response.status_code}")
         try:
@@ -50,26 +65,36 @@ class ArmWafClient:
         body: object,
         error_type: type[Exception],
         timeout_seconds: float = 120,
+        attempts: int = 1,
     ) -> object:
         session = self._session_or_default()
-        try:
-            token = self._credential_or_default().get_token(_SCOPE).token
-        except Exception as exc:
-            raise AuthenticationError("authentication failed") from _redacted(exc)
-        headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
-        try:
-            return session.request(
-                method,
-                _ARM + resource_id,
-                params={"api-version": api_version},
-                json=body,
-                headers=headers,
-                timeout=timeout_seconds,
-            )
-        except Exception as exc:
-            if "Timeout" in type(exc).__name__:
-                raise error_type(f"{method} timed out") from None
-            raise error_type(f"{method} failed") from None
+        # Connect is capped so a black-holed route fails quickly. The read
+        # budget stays with the caller: WAF PUT can legitimately take a minute.
+        timeout = (_CONNECT_TIMEOUT_SECONDS, timeout_seconds)
+        last_error: Exception | None = None
+        for attempt in range(attempts):
+            try:
+                token = self._credential_or_default().get_token(_SCOPE).token
+            except Exception as exc:
+                raise AuthenticationError("authentication failed") from _redacted(exc)
+            headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
+            try:
+                return session.request(
+                    method,
+                    _ARM + resource_id,
+                    params={"api-version": api_version},
+                    json=body,
+                    headers=headers,
+                    timeout=timeout,
+                )
+            except Exception as exc:
+                last_error = exc
+                if "Timeout" in type(exc).__name__ and attempt + 1 < attempts:
+                    continue
+                if "Timeout" in type(exc).__name__:
+                    raise error_type(f"{method} timed out") from None
+                raise error_type(f"{method} failed") from None
+        raise error_type(f"{method} failed") from last_error
 
     def _credential_or_default(self) -> object:
         if self._credential is None:
