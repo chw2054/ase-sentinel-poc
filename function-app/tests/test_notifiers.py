@@ -6,6 +6,7 @@ from sentinel_waf_block.notifiers import (
     EVENT_BLOCKED,
     EVENT_CAPACITY,
     EVENT_PUT_FAILED,
+    EVENT_WOULD_BLOCK,
     FLOW_AUDIENCE,
     TeamsWorkflowNotifier,
 )
@@ -57,6 +58,16 @@ class _Credential:
         item = _Token()
         item.token = self.token
         return item
+
+
+def test_would_block_card_says_awaiting_approval() -> None:
+    session = _Session()
+    notifier = TeamsWorkflowNotifier(URL, session=session)
+    notifier.notify(EVENT_WOULD_BLOCK, Result(status="dry-run", new_addresses=("203.0.113.9",)))
+    card = session.posts[0]["json"]["attachments"][0]["content"]
+    facts = {item["title"]: item["value"] for item in card["body"][1]["facts"]}
+    assert facts["Status"] == "awaiting-approval"
+    assert "waiting for approval" in card["body"][0]["text"]
 
 
 def test_blocked_card_carries_the_new_addresses() -> None:

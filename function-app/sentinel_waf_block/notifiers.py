@@ -39,6 +39,12 @@ _TITLES = {
     EVENT_CAPACITY: "ASE POC refused to block: the block list is full",
 }
 
+# The HTTP result stays "dry-run": the playbook starts the approval only when
+# that status comes back with new addresses. The card names the wait itself.
+_CARD_STATUS = {
+    EVENT_WOULD_BLOCK: "awaiting-approval",
+}
+
 
 def _escape(text: str) -> str:
     return html.escape(text, quote=False)
@@ -46,7 +52,9 @@ def _escape(text: str) -> str:
 
 def _message(event: str, result: Result) -> dict[str, Any]:
     title = _TITLES.get(event, "ASE POC block decision")
-    facts: list[dict[str, str]] = [{"title": "Status", "value": result.status}]
+    facts: list[dict[str, str]] = [
+        {"title": "Status", "value": _CARD_STATUS.get(event, result.status)}
+    ]
     if result.new_addresses:
         facts.append({"title": "New addresses", "value": ", ".join(result.new_addresses)})
     if result.rejected_addresses:
