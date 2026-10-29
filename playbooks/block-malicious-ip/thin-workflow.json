@@ -254,20 +254,17 @@
                   },
                   "actions": {
                     "Start_and_wait_for_an_approval": {
-                      "type": "ApiConnection",
+                      "type": "ApiConnectionWebhook",
                       "inputs": {
                         "body": {
-                          "assignedTo": "@parameters('approverEmail')",
-                          "approvalOptions": {
-                            "type": "ApproveReject",
-                            "expectedResponse": "ApproveReject",
-                            "title": "ASE POC: approve WAF block for incident @{coalesce(triggerBody()?['object']?['properties']?['incidentNumber'], '')}: @{join(coalesce(body('Call_block_function')?['new_addresses'], json('[]')), ', ')}",
-                            "notifications": {
-                              "default": {
-                                "notificationType": "ApprovalEmail",
-                                "notificationFlow": true
-                              }
-                            }
+                          "NotificationUrl": "@{listCallbackUrl()}",
+                          "Message": {
+                            "To": "@parameters('approverEmail')",
+                            "Subject": "ASE POC: approve WAF block for incident @{coalesce(triggerBody()?['object']?['properties']?['incidentNumber'], '')}: @{join(coalesce(body('Call_block_function')?['new_addresses'], json('[]')), ', ')}",
+                            "Options": "Approve, Reject",
+                            "Importance": "Normal",
+                            "ShowHTMLConfirmationDialog": true,
+                            "Body": "Incident @{coalesce(triggerBody()?['object']?['properties']?['incidentNumber'], '')}: @{coalesce(triggerBody()?['object']?['properties']?['title'], '')}. Proposed block: @{join(coalesce(body('Call_block_function')?['new_addresses'], json('[]')), ', ')}. Approve writes these addresses to the WAF block rule. Reject leaves the policy unchanged."
                           }
                         },
                         "host": {
@@ -275,8 +272,7 @@
                             "name": "@parameters('$connections')['office365']['connectionId']"
                           }
                         },
-                        "method": "post",
-                        "path": "/approvalmail/$approved"
+                        "path": "/approvalmail/$subscriptions"
                       },
                       "runAfter": {}
                     },
@@ -317,7 +313,7 @@
                       "type": "If",
                       "expression": {
                         "equals": [
-                          "@toLower(coalesce(body('Start_and_wait_for_an_approval')?['response'], ''))",
+                          "@toLower(coalesce(body('Start_and_wait_for_an_approval')?['SelectedOption'], ''))",
                           "approve"
                         ]
                       },

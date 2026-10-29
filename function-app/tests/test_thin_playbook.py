@@ -47,12 +47,22 @@ def _find(node: object, name: str) -> dict:
 def test_approval_flow_is_fail_closed() -> None:
     workflow = _workflow()
     approval = _find(workflow["actions"], "Start_and_wait_for_an_approval")
-    assert approval["inputs"]["path"] == "/approvalmail/$approved"
-    assert approval["inputs"]["body"]["assignedTo"] == "@parameters('approverEmail')"
-    options = approval["inputs"]["body"]["approvalOptions"]
-    assert options["type"] == "ApproveReject"
-    assert options["expectedResponse"] == "ApproveReject"
-    assert options["notifications"]["default"]["notificationFlow"] is True
+    assert approval["type"] == "ApiConnectionWebhook"
+    assert "method" not in approval["inputs"]
+    assert approval["inputs"]["path"] == "/approvalmail/$subscriptions"
+    assert approval["inputs"]["body"]["NotificationUrl"] == "@{listCallbackUrl()}"
+    message = approval["inputs"]["body"]["Message"]
+    assert message["To"] == "@parameters('approverEmail')"
+    assert message["Options"] == "Approve, Reject"
+    assert message["ShowHTMLConfirmationDialog"] is True
+    assert "approvalOptions" not in approval["inputs"]["body"]
+    assert "/approvalmail/$approved" not in THIN.read_text(encoding="utf-8")
+
+    decision = _find(workflow["actions"], "Decision")
+    assert decision["expression"]["equals"] == [
+        "@toLower(coalesce(body('Start_and_wait_for_an_approval')?['SelectedOption'], ''))",
+        "approve",
+    ]
 
     enforce = _find(workflow["actions"], "Call_block_function_-_enforce")
     assert enforce["inputs"]["body"]["execution"] == "enforce"
