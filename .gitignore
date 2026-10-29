@@ -7,6 +7,13 @@ function-app/**/__pycache__/
 function-app/.pytest_cache/
 function-app/*.egg-info/
 function-app/local.settings.json
+ase-out/
+scripts/__pycache__/
+scripts/.pytest_cache/
+.pytest_cache/
+extension/build/
+extension/*.egg-info/
+infra/main.json
 
 # Editor
 .vs/

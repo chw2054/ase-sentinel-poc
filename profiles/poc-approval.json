@@ -1,0 +1,380 @@
+{
+  "name": "poc-approval",
+  "includesTestWaf": true,
+  "parameters": {
+    "wafProvider": "ApplicationGateway",
+    "wafMode": "Prevention",
+    "policyState": "Enabled",
+    "autoBlockEnabled": "true",
+    "overrideProtectedRanges": "false",
+    "blockRuleName": "SentinelAutoBlock",
+    "blockRulePriority": 10,
+    "probeRuleName": "PocSimulatedProbe",
+    "probeRulePriority": 50,
+    "armApiVersion": "2024-05-01"
+  },
+  "resources": [
+    {
+      "id": "workspace",
+      "type": "Microsoft.OperationalInsights/workspaces",
+      "name": "log-${namePrefix}-${unique}",
+      "compare": [
+        {
+          "field": "location",
+          "equals": "${location}",
+          "ignoreCase": true
+        },
+        {
+          "field": "properties.sku.name",
+          "equals": "PerGB2018"
+        }
+      ]
+    },
+    {
+      "id": "solution",
+      "type": "Microsoft.OperationsManagement/solutions",
+      "name": "SecurityInsights(${workspaceName})",
+      "compare": [
+        {
+          "field": "location",
+          "equals": "${location}",
+          "ignoreCase": true
+        }
+      ]
+    },
+    {
+      "id": "onboarding",
+      "type": "Microsoft.SecurityInsights/onboardingStates",
+      "name": "default",
+      "parent": "workspace"
+    },
+    {
+      "id": "watchlist",
+      "type": "Microsoft.SecurityInsights/watchlists",
+      "name": "AseWafIpAllowlist",
+      "parent": "workspace"
+    },
+    {
+      "id": "analyticsRule",
+      "type": "Microsoft.SecurityInsights/alertRules",
+      "parent": "workspace",
+      "match": {
+        "properties.displayName": "ASE POC - simulated WAF probe"
+      },
+      "compare": [
+        {
+          "field": "properties.enabled",
+          "equals": true
+        },
+        {
+          "field": "properties.query",
+          "notContains": "parse_ipv6"
+        },
+        {
+          "field": "properties.incidentConfiguration.groupingConfiguration.reopenClosedIncident",
+          "equals": false
+        },
+        {
+          "field": "properties.incidentConfiguration.groupingConfiguration.lookbackDuration",
+          "equals": "PT12H"
+        }
+      ]
+    },
+    {
+      "id": "automationRule",
+      "type": "Microsoft.SecurityInsights/automationRules",
+      "parent": "workspace",
+      "match": {
+        "properties.displayName": "ASE POC - run block playbook for simulated WAF probe"
+      },
+      "compare": [
+        {
+          "field": "properties.triggeringLogic.isEnabled",
+          "equals": true
+        },
+        {
+          "field": "properties.triggeringLogic.triggersOn",
+          "equals": "Incidents"
+        },
+        {
+          "field": "properties.triggeringLogic.triggersWhen",
+          "equals": "Created"
+        }
+      ]
+    },
+    {
+      "id": "wafPolicy",
+      "type": "Microsoft.Network/ApplicationGatewayWebApplicationFirewallPolicies",
+      "name": "${policyName}",
+      "when": "testWaf",
+      "compare": [
+        {
+          "field": "location",
+          "equals": "${location}",
+          "ignoreCase": true
+        },
+        {
+          "field": "properties.policySettings.mode",
+          "equals": "Prevention"
+        },
+        {
+          "field": "properties.policySettings.state",
+          "equals": "Enabled"
+        }
+      ]
+    },
+    {
+      "id": "publicIp",
+      "type": "Microsoft.Network/publicIPAddresses",
+      "name": "pip-${namePrefix}",
+      "when": "testWaf",
+      "compare": [
+        {
+          "field": "location",
+          "equals": "${location}",
+          "ignoreCase": true
+        },
+        {
+          "field": "sku.name",
+          "equals": "Standard"
+        }
+      ]
+    },
+    {
+      "id": "vnet",
+      "type": "Microsoft.Network/virtualNetworks",
+      "name": "vnet-${namePrefix}",
+      "when": "testWaf",
+      "compare": [
+        {
+          "field": "location",
+          "equals": "${location}",
+          "ignoreCase": true
+        }
+      ]
+    },
+    {
+      "id": "appGateway",
+      "type": "Microsoft.Network/applicationGateways",
+      "name": "agw-${namePrefix}",
+      "when": "testWaf",
+      "compare": [
+        {
+          "field": "location",
+          "equals": "${location}",
+          "ignoreCase": true
+        },
+        {
+          "field": "properties.sku.name",
+          "equals": "WAF_v2"
+        }
+      ]
+    },
+    {
+      "id": "gatewayDiagnostics",
+      "type": "Microsoft.Insights/diagnosticSettings",
+      "name": "diag-waf-to-sentinel",
+      "parent": "appGateway",
+      "when": "testWaf",
+      "compare": [
+        {
+          "field": "properties.workspaceId",
+          "equals": "${workspaceId}",
+          "ignoreCase": true
+        }
+      ]
+    },
+    {
+      "id": "storage",
+      "type": "Microsoft.Storage/storageAccounts",
+      "name": "st${unique}",
+      "compare": [
+        {
+          "field": "location",
+          "equals": "${location}",
+          "ignoreCase": true
+        },
+        {
+          "field": "sku.name",
+          "equals": "Standard_LRS"
+        }
+      ]
+    },
+    {
+      "id": "plan",
+      "type": "Microsoft.Web/serverFarms",
+      "name": "asp-${namePrefix}-fn",
+      "compare": [
+        {
+          "field": "location",
+          "equals": "${location}",
+          "ignoreCase": true
+        },
+        {
+          "field": "sku.name",
+          "equals": "FC1"
+        }
+      ]
+    },
+    {
+      "id": "functionApp",
+      "type": "Microsoft.Web/sites",
+      "name": "fn-${namePrefix}-${unique8}",
+      "compare": [
+        {
+          "field": "location",
+          "equals": "${location}",
+          "ignoreCase": true
+        }
+      ]
+    },
+    {
+      "id": "appInsights",
+      "type": "Microsoft.Insights/components",
+      "name": "appi-${namePrefix}",
+      "compare": [
+        {
+          "field": "properties.IngestionMode",
+          "equals": "LogAnalytics"
+        },
+        {
+          "field": "properties.WorkspaceResourceId",
+          "equals": "${workspaceId}",
+          "ignoreCase": true
+        }
+      ]
+    },
+    {
+      "id": "playbook",
+      "type": "Microsoft.Logic/workflows",
+      "name": "playbook-${namePrefix}-block-malicious-ip",
+      "compare": [
+        {
+          "field": "location",
+          "equals": "${location}",
+          "ignoreCase": true
+        }
+      ]
+    },
+    {
+      "id": "sentinelConnection",
+      "type": "Microsoft.Web/connections",
+      "name": "azuresentinel-${playbookName}",
+      "compare": [
+        {
+          "field": "location",
+          "equals": "${location}",
+          "ignoreCase": true
+        }
+      ]
+    },
+    {
+      "id": "playbookDiagnostics",
+      "type": "Microsoft.Insights/diagnosticSettings",
+      "name": "diag-playbook-runtime",
+      "parent": "playbook",
+      "compare": [
+        {
+          "field": "properties.workspaceId",
+          "equals": "${workspaceId}",
+          "ignoreCase": true
+        }
+      ]
+    }
+  ],
+  "functionSettings": [
+    {
+      "name": "AUTO_BLOCK_ENABLED",
+      "equals": "false"
+    },
+    {
+      "name": "OVERRIDE_PROTECTED_RANGES",
+      "equals": "false"
+    },
+    {
+      "name": "WAF_PROVIDER",
+      "equals": "${wafProvider}"
+    },
+    {
+      "name": "BLOCK_RULE_NAME",
+      "equals": "${blockRuleName}"
+    },
+    {
+      "name": "BLOCK_RULE_PRIORITY",
+      "equals": "10"
+    },
+    {
+      "name": "MAXIMUM_BLOCK_ENTRIES",
+      "equals": "100"
+    },
+    {
+      "name": "PROTECTED_IP_RANGES",
+      "equalsJson": "[]"
+    },
+    {
+      "name": "NOTIFY_EVENTS",
+      "equals": "would_block,blocked,put_failed,capacity"
+    },
+    {
+      "name": "APPLICATIONINSIGHTS_AUTHENTICATION_STRING",
+      "equals": "Authorization=AAD"
+    },
+    {
+      "name": "AzureWebJobsStorage__credential",
+      "equals": "managedidentity"
+    },
+    {
+      "name": "ARM_API_VERSION",
+      "equals": "${armApiVersion}"
+    },
+    {
+      "name": "WAF_POLICY_RESOURCE_ID",
+      "equals": "${wafPolicyId}",
+      "ignoreCase": true
+    }
+  ],
+  "roles": [
+    {
+      "id": "functionSentinelResponder",
+      "principalFrom": "functionApp",
+      "roleDefinitionId": "3e150937-b8fe-4cfb-8069-0eaf05ecd056",
+      "scope": "resourceGroup"
+    },
+    {
+      "id": "playbookSentinelResponder",
+      "principalFrom": "playbook",
+      "roleDefinitionId": "3e150937-b8fe-4cfb-8069-0eaf05ecd056",
+      "scope": "resourceGroup"
+    },
+    {
+      "id": "functionWafContributor",
+      "principalFrom": "functionApp",
+      "roleDefinitionId": "4d97b98b-1d4f-4787-a291-c67834d212e7",
+      "scope": "wafPolicy"
+    },
+    {
+      "id": "functionBlobOwner",
+      "principalFrom": "functionApp",
+      "roleDefinitionId": "b7e6dc6d-f1e8-4753-8033-0f276bb0955b",
+      "scope": "storage"
+    },
+    {
+      "id": "functionQueueContributor",
+      "principalFrom": "functionApp",
+      "roleDefinitionId": "974c5e8b-45b9-4653-ba55-5f855dd0fb88",
+      "scope": "storage"
+    },
+    {
+      "id": "functionTableContributor",
+      "principalFrom": "functionApp",
+      "roleDefinitionId": "0a9a7e1f-b9d0-4cc4-a60d-0319b160aaa3",
+      "scope": "storage"
+    },
+    {
+      "id": "functionMetricsPublisher",
+      "principalFrom": "functionApp",
+      "roleDefinitionId": "3913510d-42f4-4e42-8a64-420c390055eb",
+      "scope": "appInsights"
+    }
+  ]
+}
