@@ -22,10 +22,9 @@ from fastapi.responses import JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
-from app.api import install_errors
 from app.auth import COOKIE, LOCAL_USERS, login_local, principal_from_request
 from app.config import Settings
-from app.ops import OpsError
+from app.errors import OpsError, install_errors
 
 INCIDENT_API = "2024-03-01"
 POLICY_API = "2024-05-01"

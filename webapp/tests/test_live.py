@@ -32,12 +32,8 @@ SENTINEL_ID = (
 
 def settings() -> Settings:
     return Settings(
-        database_url="",
         secret="test-secret",
         dev_login_password="local-dev",
-        integration_key="",
-        seed_fixture=False,
-        live_azure=True,
         subscription_id="sub",
         resource_group="rg",
         workspace_name=WORKSPACE,
@@ -377,8 +373,3 @@ def test_playbook_api_requires_the_shared_key() -> None:
     )
     assert garbage.status_code == 400
     assert garbage.json()["reason"] == "request body is not JSON"
-
-
-def test_sql_mode_stays_on_the_fixture() -> None:
-    api = TestClient(create_app(Settings(database_url="sqlite:///:memory:", seed_fixture=False)))
-    assert api.get("/health").json()["liveAzure"] is False

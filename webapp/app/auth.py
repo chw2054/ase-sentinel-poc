@@ -10,7 +10,7 @@ from itsdangerous import BadSignature, URLSafeSerializer
 from starlette.requests import Request
 
 from app.config import Settings
-from app.ops import OpsError, Principal
+from app.errors import OpsError, Principal
 
 COOKIE = "ase_user"
 LOCAL_USERS = {
@@ -41,22 +41,6 @@ def principal_from_request(request: Request) -> Principal | None:
     if roles is None:
         return None
     return Principal(data["name"], roles)
-
-
-def integration_principal(request: Request) -> Principal:
-    settings: Settings = request.app.state.settings
-    supplied = request.headers.get("x-integration-key", "")
-    expected = settings.integration_key
-    if not expected or not secrets.compare_digest(supplied, expected):
-        raise OpsError(401, "unauthorized", "integration key was rejected")
-    return Principal("logic-app", frozenset({"integration"}), kind="integration")
-
-
-def require_user(request: Request) -> Principal:
-    principal = principal_from_request(request)
-    if principal is None:
-        raise OpsError(401, "unauthorized", "sign in is required")
-    return principal
 
 
 def login_local(settings: Settings, email: str, password: str) -> str:
