@@ -158,49 +158,6 @@ function Get-ChildResources {
     return ,$values
 }
 
-function Get-AllowedSettings {
-    param([string] $ResourceGroup, [string] $FunctionName, [string] $Subscription)
-    $allowed = @(
-        'AUTO_BLOCK_ENABLED',
-        'OVERRIDE_PROTECTED_RANGES',
-        'WAF_PROVIDER',
-        'WAF_POLICY_RESOURCE_ID',
-        'BLOCK_RULE_NAME',
-        'BLOCK_RULE_PRIORITY',
-        'MAXIMUM_BLOCK_ENTRIES',
-        'PROTECTED_IP_RANGES',
-        'NOTIFY_EVENTS',
-        'APPLICATIONINSIGHTS_AUTHENTICATION_STRING',
-        'AzureWebJobsStorage__credential',
-        'ARM_API_VERSION'
-    )
-    $temp = Join-Path ([System.IO.Path]::GetTempPath()) ("ase-settings-{0}.json" -f [guid]::NewGuid().ToString('n'))
-    try {
-        & az functionapp config appsettings list `
-            --resource-group $ResourceGroup `
-            --name $FunctionName `
-            --subscription $Subscription `
-            -o json --only-show-errors |
-            Set-Content -LiteralPath $temp -Encoding utf8NoBOM
-        if ($LASTEXITCODE -ne 0) {
-            return @{ read = $false; settings = @() }
-        }
-        $all = @(Get-Content -LiteralPath $temp -Raw | ConvertFrom-Json)
-        $kept = foreach ($item in $all) {
-            if ($allowed -contains [string] $item.name) {
-                [pscustomobject]@{
-                    name  = [string] $item.name
-                    value = [string] $item.value
-                }
-            }
-        }
-        return @{ read = $true; settings = @($kept) }
-    }
-    finally {
-        Remove-Item -LiteralPath $temp -Force -ErrorAction SilentlyContinue
-    }
-}
-
 function Get-LiveSnapshot {
     param([string] $Subscription)
     $listed = @(Invoke-AzJson -Required @(
@@ -260,17 +217,6 @@ function Get-LiveSnapshot {
         }
     }
 
-    $functionApp = @($resources) | Where-Object {
-        $null -ne $_ -and ([string] $_.type).ToLowerInvariant() -eq 'microsoft.web/sites' -and [string] $_.name -like "fn-$NamePrefix-*"
-    } | Select-Object -First 1
-    $settingsRead = $true
-    $settings = @()
-    if ($null -ne $functionApp) {
-        $loaded = Get-AllowedSettings -ResourceGroup $ResourceGroupName -FunctionName ([string] $functionApp.name) -Subscription $Subscription
-        $settingsRead = [bool] $loaded.read
-        $settings = @($loaded.settings)
-    }
-
     $roles = @{}
     $roles.resourceGroup = Get-RoleItems -Scope "/subscriptions/$Subscription/resourceGroups/$ResourceGroupName" -Subscription $Subscription
     foreach ($pair in @(
@@ -294,9 +240,9 @@ function Get-LiveSnapshot {
         resourceGroup          = $ResourceGroupName
         existingWafPolicyName  = $ExistingWafPolicyName
         forceDeployTestWaf    = [bool] $DeployTestWaf
-        functionSettingsRead   = $settingsRead
+        functionSettingsRead   = $true
         resources              = @($resources)
-        functionSettings       = @($settings)
+        functionSettings       = @()
         roles                  = $roles
     }
 }

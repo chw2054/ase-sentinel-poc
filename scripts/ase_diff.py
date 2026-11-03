@@ -1,8 +1,7 @@
 """Compare an Azure snapshot with a PoC profile.
 
-The snapshot may contain WAF match values and function settings. compare()
-drops both before it builds the report. Callers still should not write the
-raw snapshot to disk.
+The snapshot may contain WAF match values. compare() drops addresses before
+it builds the report. Callers still should not write the raw snapshot to disk.
 """
 
 from __future__ import annotations
@@ -12,21 +11,6 @@ import json
 import re
 from pathlib import Path
 from typing import Any
-
-ALLOWED_SETTINGS = {
-    "AUTO_BLOCK_ENABLED",
-    "OVERRIDE_PROTECTED_RANGES",
-    "WAF_PROVIDER",
-    "WAF_POLICY_RESOURCE_ID",
-    "BLOCK_RULE_NAME",
-    "BLOCK_RULE_PRIORITY",
-    "MAXIMUM_BLOCK_ENTRIES",
-    "PROTECTED_IP_RANGES",
-    "NOTIFY_EVENTS",
-    "APPLICATIONINSIGHTS_AUTHENTICATION_STRING",
-    "AzureWebJobsStorage__credential",
-    "ARM_API_VERSION",
-}
 
 SECRET_MARKERS = (
     "instrumentationkey=",
@@ -78,7 +62,6 @@ def _as_list(value: Any) -> list[Any]:
 
 def compare(profile: dict[str, Any], observed: dict[str, Any]) -> dict[str, Any]:
     resources = [_sanitize_resource(item) for item in _as_list(observed.get("resources"))]
-    settings = _allowed_settings(_as_list(observed.get("functionSettings")))
     variables = _variables(profile, observed, resources)
     expected = [item for item in profile["resources"] if _included(item, profile)]
     matched: dict[str, dict[str, Any]] = {}
@@ -111,13 +94,6 @@ def compare(profile: dict[str, Any], observed: dict[str, Any]) -> dict[str, Any]
         differences = _compare_fields(spec.get("compare") or [], found, variables)
         if spec["id"] == "wafPolicy":
             differences.extend(_probe_differences(profile, found))
-        if spec["id"] == "functionApp":
-            if observed.get("functionSettingsRead") is False:
-                differences.append(
-                    {"field": "functionSettings", "expected": None, "actual": None, "unread": True}
-                )
-            else:
-                differences.extend(_setting_differences(profile, settings, variables))
         rows.append(
             {
                 "id": spec["id"],
@@ -341,34 +317,6 @@ def _probe_differences(profile: dict[str, Any], policy: dict[str, Any]) -> list[
     return []
 
 
-def _setting_differences(
-    profile: dict[str, Any], settings: dict[str, str], variables: dict[str, str]
-) -> list[dict[str, Any]]:
-    differences: list[dict[str, Any]] = []
-    for check in profile.get("functionSettings") or []:
-        name = check["name"]
-        if name not in settings:
-            differences.append({"field": name, "expected": check.get("equals", check.get("equalsJson")), "actual": None})
-            continue
-        actual = settings[name]
-        if "equalsJson" in check:
-            expected = expand(str(check["equalsJson"]), variables)
-            try:
-                actual_norm = json.dumps(json.loads(actual), separators=(",", ":"), sort_keys=True)
-                expected_norm = json.dumps(json.loads(expected), separators=(",", ":"), sort_keys=True)
-            except json.JSONDecodeError:
-                differences.append({"field": name, "expected": expected, "actual": "<redacted>" if _secret_text(actual) else actual})
-                continue
-            if actual_norm != expected_norm:
-                differences.append({"field": name, "expected": expected_norm, "actual": actual_norm})
-            continue
-        expected = expand(str(check["equals"]), variables)
-        if not _equals(actual, expected, bool(check.get("ignoreCase"))):
-            shown = "<redacted>" if _secret_text(str(actual)) else actual
-            differences.append({"field": name, "expected": expected, "actual": shown})
-    return differences
-
-
 def _role_rows(
     profile: dict[str, Any],
     observed: dict[str, Any],
@@ -532,17 +480,6 @@ def _sanitize_resource(resource: dict[str, Any]) -> dict[str, Any]:
     properties = cleaned.setdefault("properties", {})
     properties["customRules"] = sanitized
     return cleaned
-
-
-def _allowed_settings(settings: list[dict[str, Any]]) -> dict[str, str]:
-    kept: dict[str, str] = {}
-    for item in settings:
-        name = str(item.get("name") or "")
-        if name not in ALLOWED_SETTINGS:
-            continue
-        value = item.get("value")
-        kept[name] = "" if value is None else str(value)
-    return kept
 
 
 def _custom_rules(policy: dict[str, Any] | None) -> list[dict[str, Any]] | None:

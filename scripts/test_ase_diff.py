@@ -63,10 +63,10 @@ def test_profile_names_match_bicep_templates():
         if "name" in item
     }
     assert names["workspace"] == "log-ase-sentinel-poc-cc5a2vz77toz6"
-    assert names["storage"] == "stcc5a2vz77toz6"
-    assert names["functionApp"] == "fn-ase-sentinel-poc-cc5a2vz7"
-    assert names["plan"] == "asp-ase-sentinel-poc-fn"
-    assert names["appInsights"] == "appi-ase-sentinel-poc"
+    assert "storage" not in names
+    assert "functionApp" not in names
+    assert "plan" not in names
+    assert "appInsights" not in names
     assert names["appGateway"] == "agw-ase-sentinel-poc"
     assert names["publicIp"] == "pip-ase-sentinel-poc"
     assert names["vnet"] == "vnet-ase-sentinel-poc"
@@ -82,17 +82,17 @@ def test_missing_workspace_and_unresolved_unique_names():
     report = ase_diff.compare(PROFILE, _base())
     statuses = {row["id"]: row["status"] for row in report["resources"]}
     assert statuses["workspace"] == "missing"
-    assert statuses["storage"] == "missing"
-    assert statuses["functionApp"] == "missing"
+    assert "storage" not in statuses
+    assert "functionApp" not in statuses
     assert report["deploy"]["deployTestWaf"] is True
     assert report["deploy"]["willNotChangeCustomRules"] is False
 
 
 def test_location_display_name_matches_region_slug():
     observed = _matching()
-    _by_type(observed, "Microsoft.Web/serverFarms")["location"] = "East US"
+    _by_type(observed, "Microsoft.Logic/workflows")["location"] = "East US"
     report = ase_diff.compare(PROFILE, observed)
-    assert _row(report, "plan")["status"] == "match"
+    assert _row(report, "playbook")["status"] == "match"
 
 
 def test_location_mismatch_is_different():
@@ -109,6 +109,11 @@ def test_location_mismatch_is_different():
 def test_matching_snapshot_and_disabled_rule_is_different():
     report = ase_diff.compare(PROFILE, _matching())
     assert all(row["status"] == "match" for row in report["resources"])
+    unmanaged = {(item["type"], item["name"]) for item in report["unmanaged"]}
+    assert ("Microsoft.Storage/storageAccounts", f"st{UNIQUE}") in unmanaged
+    assert ("Microsoft.Web/serverFarms", f"asp-{PREFIX}-fn") in unmanaged
+    assert ("Microsoft.Web/sites", f"fn-{PREFIX}-{UNIQUE[:8]}") in unmanaged
+    assert ("Microsoft.Insights/components", f"appi-{PREFIX}") in unmanaged
     assert report["deploy"]["deployTestWaf"] is False
     assert report["deploy"]["existingWafPolicyName"] == "wafpol-ase-sentinel-poc"
     assert report["deploy"]["willNotChangeCustomRules"] is True
@@ -168,7 +173,7 @@ def test_connection_string_is_dropped_before_the_report():
     encoded = json.dumps(report)
     assert "InstrumentationKey=" not in encoded
     assert "example.invalid" not in encoded
-    assert _row(report, "functionApp")["status"] == "match"
+    assert "functionApp" not in {row["id"] for row in report["resources"]}
 
 
 def test_existing_policy_refuses_forced_test_waf_deploy():
@@ -184,9 +189,10 @@ def test_unreadable_role_assignment_is_unknown():
     observed = _matching()
     observed["roles"]["resourceGroup"] = {"ok": False, "items": []}
     report = ase_diff.compare(PROFILE, observed)
-    assert _row(report, "functionSentinelResponder")["status"] == "unknown"
     assert _row(report, "playbookSentinelResponder")["status"] == "unknown"
-    assert _row(report, "functionWafContributor")["status"] == "match"
+    ids = {row["id"] for row in report["resources"]}
+    assert "functionSentinelResponder" not in ids
+    assert "functionWafContributor" not in ids
 
 
 def test_extra_resource_is_unmanaged():
