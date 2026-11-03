@@ -1,6 +1,6 @@
 # Deployment
 
-Use `scripts/deploy.ps1`. It creates the resource group, deploys `infra/main.bicep`, publishes the Python Function App, binds the playbook to that function, removes Network Contributor from the playbook identity, assigns the Sentinel automation role, and then deploys the automation rule. `infra/parameters/main.bicepparam` is the safe default set for review. A deployment that uses only that file does not publish the function and does not create the automation rule, so Sentinel will not call a working playbook.
+Use `scripts/deploy.ps1` for a new resource group. It creates the resource group, deploys `infra/main.bicep`, removes Network Contributor from the playbook identity, assigns the Sentinel automation role, and then deploys the automation rule. It does not create or publish a Function App, and it does not write the operations web app's settings. Do not run it against the live resource group: the main template redeploys the playbook with an empty `functionKey` and can reset the Office 365 connection. `infra/parameters/main.bicepparam` is the safe default set for review. A deployment that uses only that file does not create the automation rule, so Sentinel will not call the playbook.
 
 ## Default test rig
 
@@ -16,7 +16,7 @@ What-if, main template only:
 
 The script prints a warning that WAF_v2 bills hourly. Application Gateway deployments often take 20 to 40 minutes.
 
-Outputs include the workspace name, workspace resource id, policy id, playbook name, function app name, Application Insights name, `autoBlockEnabled`, the detection query kind, the analytics rule id, and the public IP when the test rig was created. The Application Insights connection string is not printed.
+Outputs include the workspace name, workspace resource id, policy id, playbook name, `blockApiUrl`, `autoBlockEnabled`, the detection query kind, the analytics rule id, and the public IP when the test rig was created. `autoBlockEnabled` is a deployment output. It does not change the web app setting `AUTO_BLOCK_ENABLED`.
 
 ## Parameters the script enforces
 
@@ -36,7 +36,7 @@ Customer ranges are passed as a JSON array string. A one-element array stays an 
 
 ## Existing Application Gateway policy
 
-Only do this with a disposable policy. The function identity receives Network Contributor on that policy. Opt-in mode PUTs the policy.
+Only do this with a disposable policy. This template does not grant Network Contributor. The identity that calls the block API needs that role on the policy before a PUT can succeed. The live web app already has it. A new environment does not receive it from `infra/main.bicep`.
 
 ```powershell
 ./scripts/deploy.ps1 `
@@ -70,7 +70,7 @@ What this does not do:
 
 `AzureDiagnostics` is the query Microsoft documents (`Category == "FrontDoorWebApplicationFirewallLog"`, with `column_ifexists` for `clientIP_s`, `action_s`, `ruleName_s`, `requestUri_s`, and `host_s`). Use `-FrontDoorLogDestination ResourceSpecific` only after ASE confirms `AzureFrontDoorWebApplicationFirewallLog` in the chosen workspace. The script warns when that option is selected.
 
-Blocking stays on unless you also pass `-AutoBlockEnabled $false`.
+`-AutoBlockEnabled` changes the deployment output only. The web app setting `AUTO_BLOCK_ENABLED` stays whatever is already on that app.
 
 ## Automation rule phase
 
@@ -93,24 +93,17 @@ If the principal cannot be found, the script leaves the analytics rule and the p
 
 If the second deployment fails on replication, wait and run `-AutomationRuleOnly` again. The rule name is stable, so the retry updates the same rule.
 
-## Application Insights
+## Block API URL
 
-The function module creates a workspace-based Application Insights component on the Sentinel Log Analytics workspace and assigns Monitoring Metrics Publisher to the function identity. The function app settings are `APPLICATIONINSIGHTS_CONNECTION_STRING` and `APPLICATIONINSIGHTS_AUTHENTICATION_STRING=Authorization=AAD`. The script does not print the connection string. Invocation and trace rows show up in that workspace after the function handles a request. Sampling is off in `function-app/host.json`.
+`-BlockApiUrl` is the HTTPS URL of `POST /api/SentinelWafAutoBlock` on the operations web app. The template passes it to the playbook parameter `functionUrl`. The parameter name stays `functionUrl`. Empty leaves that parameter empty, so a new playbook does not call the API. The script does not set `functionKey`. Put `BLOCK_API_KEY` into that secure parameter outside this script, and do not print it.
 
-## Returning to dry-run
+## Leftover telemetry resources
 
-Redeploy with the same resource group and name prefix:
+The template no longer creates Application Insights or a storage account. Incremental Bicep will not delete `appi-ase-sentinel-poc` or `st7ttpll74bmhiq` if they are still in the resource group. Leave them until you confirm the web app does not use them.
 
-```powershell
-./scripts/deploy.ps1 `
-  -ResourceGroupName rg-ase-sentinel-poc `
-  -NamePrefix ase-sentinel-poc `
-  -AutoBlockEnabled $false
-```
+## Dry-run
 
-Bicep writes `AUTO_BLOCK_ENABLED` as the JSON token `false`. Previous incidents are not replayed. The default deploy writes the token `true`.
-
-The function publish packs `function-app/function_app.py`, `host.json`, `sentinel_waf_block`, and Linux wheels. It does not use remote build. The script then reads the host function key, writes it only into a temporary parameters file, and deploys `infra/modules/playbook.bicep` again so the Logic App secure parameter is set. The script does not print the key. A full deploy clears that parameter during the main template and sets it again in the binding step. Until the binding step finishes, the playbook comments that the function URL is empty, or that the call did not finish, and it does not decide a block. After publish, the script reads the app settings back. If `AUTO_BLOCK_ENABLED` or `OVERRIDE_PROTECTED_RANGES` is not the lowercase JSON token, it rewrites the whole setting dictionary and restarts the app. That rewrite keeps every other setting, including the Application Insights connection string.
+Keep `AUTO_BLOCK_ENABLED` as the JSON token `false` on the operations web app. The playbook sends `execution=dry-run`, then `execution=enforce` only after approval. `execution=enforce` writes for that call. `execution=dry-run` does not. `-AutoBlockEnabled $false` changes the deployment output only. Do not redeploy the live playbook to change that flag.
 
 ## Destroy
 

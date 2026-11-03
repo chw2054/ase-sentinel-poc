@@ -1,16 +1,16 @@
 # Security considerations
 
-This POC changes a WAF policy when `autoBlockEnabled` is true. That is the default in Bicep and in `scripts/deploy.ps1`. Pass `-AutoBlockEnabled $false` to deploy a dry-run. `-ConfirmAutoBlock` is accepted and is not required. The Function App setting is the JSON token `true` or `false`. The strings `True` and `False` are rejected.
+The operations web app changes a WAF policy when the effective block flag is the JSON boolean `true`. `AUTO_BLOCK_ENABLED` on the web app is that flag. The playbook sends `execution=dry-run` and, after approval, `execution=enforce`. `execution=enforce` writes for that call even when the app setting is `false`. `execution=dry-run` does not write. The template parameter `autoBlockEnabled` is a deployment output and does not set the web app. The strings `True` and `False` are rejected.
 
 ## Identity
 
-The playbook and the Function App each use a system-assigned managed identity. The Sentinel API connection is `ManagedServiceIdentity` with `parameterValueType` Alternative. There is no user OAuth token in source.
+The playbook and the operations web app each use a system-assigned managed identity. The Sentinel API connection is `ManagedServiceIdentity` with `parameterValueType` Alternative. There is no user OAuth token in source.
 
-The playbook identity can read incident entities and write a comment when the function call does not finish. It does not have Network Contributor. The function identity can comment on incidents in the POC resource group (Sentinel Responder) and can write the single WAF policy (Network Contributor). Neither identity is a subscription Owner or a contributor on the resource group.
+The playbook identity can read incident entities and write a comment when the block API call does not finish. It does not have Network Contributor. The web app identity can comment on incidents in the POC resource group (Sentinel Responder) and can write the single WAF policy (Network Contributor). That policy assignment already exists on the live web app. `infra/main.bicep` does not grant it. Neither identity is a subscription Owner or a contributor on the resource group.
 
-Network Contributor is broader than updating one custom rule. A holder of the function identity can change other properties of that policy, including managed rules, if the code is changed later. The function PUTs `policySettings`, `customRules`, and `managedRules` echoed from the GET, plus the block rule. It does not grant itself more roles.
+Network Contributor is broader than updating one custom rule. A holder of the web app identity can change other properties of that policy, including managed rules, if the code is changed later. The web app PUTs `policySettings`, `customRules`, and `managedRules` echoed from the GET, plus the block rule. It does not grant itself more roles.
 
-The function key is a Logic App secure parameter. `deploy.ps1` does not print it. The binding deployment stores it. The function runtime uses its system-assigned identity for host storage. Flex package upload still uses the storage account key. That key is not written to the repository.
+The playbook secure parameter `functionKey` holds the web app setting `BLOCK_API_KEY`. The workflow parameter name stays `functionKey`. `deploy.ps1` does not print it and does not set it. There is no Function App and no Flex package upload in the template. Do not run `deploy.ps1` against the live resource group. The main template redeploys the playbook with an empty `functionKey`.
 
 The Azure Security Insights service principal is granted Microsoft Sentinel Automation Contributor on the POC resource group so an automation rule can start the playbook. That is the role Microsoft requires for `RunPlaybook`. It is not granted on other resource groups by this template.
 
@@ -24,19 +24,19 @@ The analytics rule and the playbook both refuse, unless `overrideProtectedRanges
 - Link-local `169.254.0.0/16`, which includes the instance metadata address `169.254.169.254`
 - `100.64.0.0/10`
 
-The rule also applies watchlist `AseWafIpAllowlist`. The function applies `protectedIpRanges` from its app settings and does not read that watchlist. Built-in ranges are hard-coded in the KQL and in the function, so a watchlist edit cannot remove them.
+The rule also applies watchlist `AseWafIpAllowlist`. The web app applies `protectedIpRanges` from its app settings and does not read that watchlist. Built-in ranges are hard-coded in the KQL and in the web app, so a watchlist edit cannot remove them.
 
 `overrideProtectedRanges` skips those filters in both places. The deploy script will not set it without `-ConfirmOverrideProtectedRanges`. Empty values and non-canonical addresses are still rejected. They are not written into `IPMatch` or Front Door `matchValue`.
 
-Customer ranges the function cannot parse fail the run before any block decision, including the dry-run sentence. The deploy script rejects those ranges first. The function check remains so a later app-setting edit cannot silently ignore a prefix such as `/12`.
+Customer ranges the web app cannot parse fail the run before any block decision, including the dry-run sentence. The deploy script rejects those ranges first. The web app check remains so a later app-setting edit cannot silently ignore a prefix such as `/12`.
 
 ## Dry-run and opt-in
 
-The function sends a PUT only when `autoBlockEnabled` is the JSON boolean `true`. The string `"true"` stays a dry-run. Dry-run still GETs the policy so it can avoid saying "Would block" for an address that is already listed. GET does not modify the policy. An incident with no canonical IPv4 address does not GET. The function rejects those values and does not change the policy.
+The web app sends a PUT only when the effective flag is the JSON boolean `true`. The string `"true"` stays a dry-run when `execution` is omitted. Dry-run still GETs the policy so it can avoid saying "Would block" for an address that is already listed. GET does not modify the policy. An incident with no canonical IPv4 address does not GET. The web app rejects those values and does not change the policy.
 
 Duplicates are removed with `union` before a write. A second incident for an address already on the rule does not PUT. If the merged list would exceed `maximumBlockEntries`, nothing is written.
 
-The automation rule does not contain an approval action. With the default `autoBlockEnabled` of true, the next matching incident is written without an analyst click. Pass `-AutoBlockEnabled $false` to stop those writes. That product choice is still open for ASE. The README question list leaves it open.
+The automation rule starts the playbook and does not itself approve a block. The playbook waits for an Office 365 approval before it sends `execution=enforce`. Keep `AUTO_BLOCK_ENABLED` false on the web app unless a request is supposed to write when `execution` is omitted.
 
 ## Evidence
 

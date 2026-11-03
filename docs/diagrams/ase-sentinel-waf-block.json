@@ -21,7 +21,7 @@
     { "id": "rule", "kind": "rect", "x": 1128, "y": 152, "width": 250, "height": 68, "label": "Sentinel analytics", "sublabel": "3 transactions in 30 min", "fill": "#faf5ff", "stroke": "#8b5cf6", "flat": true },
     { "id": "incident", "kind": "rect", "x": 60, "y": 364, "width": 250, "height": 68, "label": "Sentinel incident", "sublabel": "group by IP, 12 h", "fill": "#fef2f2", "stroke": "#dc2626", "flat": true },
     { "id": "playbook", "kind": "rect", "x": 416, "y": 364, "width": 250, "height": 68, "label": "Logic App playbook", "sublabel": "incident Created only", "fill": "#faf5ff", "stroke": "#8b5cf6", "flat": true },
-    { "id": "function", "kind": "double_rect", "x": 772, "y": 364, "width": 250, "height": 68, "label": "Python Function", "sublabel": "AUTO_BLOCK_ENABLED true", "fill": "#eff6ff", "stroke": "#3b82f6", "flat": true },
+    { "id": "function", "kind": "double_rect", "x": 772, "y": 364, "width": 250, "height": 68, "label": "Operations web app", "sublabel": "POST /api/SentinelWafAutoBlock", "fill": "#eff6ff", "stroke": "#3b82f6", "flat": true },
     { "id": "policy", "kind": "rect", "x": 1128, "y": 364, "width": 250, "height": 68, "label": "SentinelAutoBlock", "sublabel": "priority 10, PUT the IP", "fill": "#fff7ed", "stroke": "#f97316", "flat": true },
     { "id": "insights", "kind": "cylinder", "x": 772, "y": 576, "width": 250, "height": 68, "label": "Application Insights", "sublabel": "AppRequests, AppTraces", "fill": "#ecfdf5", "stroke": "#10b981" }
   ],

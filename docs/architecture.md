@@ -17,7 +17,7 @@ The POC is one resource group. An engineer can delete that group and redeploy it
 | Action values the query accepts | `Blocked`, `Detected` | `Block`, `Log` |
 | Block-rule JSON | `customRules[]`, `matchVariables[].variableName`, `matchValues`, `state` | `customRules.rules[]`, `matchVariable`, `matchValue`, `enabledState`, plus `sku` echoed from GET |
 
-The KQL files are selected at deploy time in `infra/modules/sentinel.bicep`. Replacing the WAF product is a parameter and a policy resource id, not a rewrite of the incident path. The function branches on `wafProvider` and will not PUT when that value is anything else.
+The KQL files are selected at deploy time in `infra/modules/sentinel.bicep`. Replacing the WAF product is a parameter and a policy resource id, not a rewrite of the incident path. The web app branches on `wafProvider` and will not PUT when that value is anything else.
 
 The Sentinel module waits for the test-rig module, which creates the Dedicated diagnostic setting, before the analytics rule that names `AGWFirewallLogs` is saved.
 
@@ -66,24 +66,20 @@ Trigger path: `/incident-creation`. The Logic App calls `Entities - Get IPs`, se
 
 The web app package `sentinel_waf_block` owns validation, the WAF read, dry-run, and the PUT. `autoBlockEnabled` is the web app setting `AUTO_BLOCK_ENABLED`. Only the JSON boolean `true` sends a PUT when `execution` is omitted. A request with `execution` set to `enforce` or `dry-run` overrides that setting for that call. A missing setting stays dry-run. The playbook sends `x-functions-key`, which must match `BLOCK_API_KEY`. Easy Auth excludes that one path.
 
-The operations web app serves that API on Python 3.11. `scripts/deploy.ps1` still publishes the retired Function App and redeploys the playbook. Do not run it against the live resource group. The main template deploys the playbook with an empty key, and that redeploy can reset the Office 365 connection.
+The operations web app serves that API on Python 3.11. `infra/main.bicep` does not create a Function App, a storage account, or an Application Insights component. `scripts/deploy.ps1` does not publish one. Do not run that script against the live resource group. The main template deploys the playbook with an empty `functionKey`, and that redeploy can reset the Office 365 connection. Pass `-BlockApiUrl` only when a new playbook should call the web app. An empty value clears `functionUrl`.
 
-Application Insights is a workspace-based component on the same Log Analytics workspace. The function settings are `APPLICATIONINSIGHTS_CONNECTION_STRING` and `APPLICATIONINSIGHTS_AUTHENTICATION_STRING=Authorization=AAD`. The connection string is not printed. Invocation logs are `AppRequests` and `AppTraces` in that workspace. `host.json` turns sampling off.
-
-This subscription's storage policies force `publicNetworkAccess` to Disabled and shared-key access off unless the account is tagged `SecurityControl=Ignore`. That tag is set only on the function storage account. Public network access stays enabled so Flex can reach the blob container without a private endpoint. Shared-key access stays enabled because Flex package upload uses the account key. The function runtime still uses its managed identity for host storage. Anonymous blob access stays disabled. The account key is not written to the repository.
+Incremental Bicep does not delete a resource that the template no longer mentions. Storage account `st7ttpll74bmhiq` and Application Insights `appi-ase-sentinel-poc` can remain in the resource group. This repository does not delete them. Confirm the web app does not write that component before anyone removes them in Azure.
 
 ## Identity and RBAC
 
 | Principal | Role | Scope |
 | --- | --- | --- |
-| Playbook managed identity | Microsoft Sentinel Responder `3e150937-b8fe-4cfb-8069-0eaf05ecd056` | POC resource group, so it can read IP entities and comment when the function call does not finish |
-| Function managed identity | Microsoft Sentinel Responder `3e150937-b8fe-4cfb-8069-0eaf05ecd056` | POC resource group, so it can comment on the incident after a decision |
-| Function managed identity | Network Contributor `4d97b98b-1d4f-4787-a291-c67834d212e7` | The one WAF policy resource |
-| Function managed identity | Storage Blob Data Owner, Storage Queue Data Contributor, Storage Table Data Contributor | The function storage account |
-| Function managed identity | Monitoring Metrics Publisher `3913510d-42f4-4e42-8a64-420c390055eb` | The Application Insights component |
+| Playbook managed identity | Microsoft Sentinel Responder `3e150937-b8fe-4cfb-8069-0eaf05ecd056` | POC resource group, so it can read IP entities and comment when the block API call does not finish |
+| Operations web app managed identity | Microsoft Sentinel Responder `3e150937-b8fe-4cfb-8069-0eaf05ecd056` | POC resource group, so it can comment on the incident after a decision. The live assignment is not created by `infra/main.bicep` |
+| Operations web app managed identity | Network Contributor `4d97b98b-1d4f-4787-a291-c67834d212e7` | The one WAF policy resource. The live assignment stays. This template does not grant it |
 | Azure Security Insights service principal | Microsoft Sentinel Automation Contributor `f4c81013-99ee-4d62-a7ee-b3f1f648599a` | POC resource group, so the automation rule can start the playbook |
 
-No user OAuth token is stored in source. The function reaches its storage account with managed identity, not an account key. The function key is created at deploy time and is not printed. The automation-rule role assignment name is `guid(resourceGroup, principalId, roleId)`. The automation rule name is `guid('ase-waf-block-playbook', workspace.id)`.
+No user OAuth token is stored in source. The playbook secure parameter `functionKey` holds the web app setting `BLOCK_API_KEY`. The workflow parameter name stays `functionKey`. The deploy script does not print that value and does not set it. The automation-rule role assignment name is `guid(resourceGroup, principalId, roleId)`. The automation rule name is `guid('ase-waf-block-playbook', workspace.id)`.
 
 Network Contributor can change more than the custom-rule list. That gap is recorded in [security-considerations.md](security-considerations.md) and [production-hardening.md](production-hardening.md). A custom role definition was not added, because its exact action set should be confirmed against the policy type ASE uses.
 
@@ -93,5 +89,5 @@ Network Contributor can change more than the custom-rule list. That gap is recor
 - Microsoft Sentinel Content Hub solution for WAF. Those workbooks often assume `AzureDiagnostics`.
 - Private Link, TLS, a real backend, zones, an NSG, and customer-managed keys.
 - Automatic expiry, unblock, or an approval action inside the automation rule.
-- Blocking text that is not a canonical IPv4 address. The function rejects it. The test gateway frontend is IPv4.
+- Blocking text that is not a canonical IPv4 address. The web app rejects it. The test gateway frontend is IPv4.
 - Rewriting match values already stored on the named rule. Those strings are copied back unchanged.

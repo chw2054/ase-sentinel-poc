@@ -2,7 +2,7 @@
 
 Proof of concept for this path:
 
-`WAF request -> diagnostic log -> Log Analytics -> Sentinel analytics rule -> incident -> automation rule -> Logic App -> Python function -> block decision`
+`WAF request -> diagnostic log -> Log Analytics -> Sentinel analytics rule -> incident -> automation rule -> Logic App -> operations web app -> block decision`
 
 The detection is a **simulated probe**, a normal HTTP GET that carries the query-string marker `ase-poc-probe`. It does not identify a malicious actor. The playbook's safe default is dry-run: it records `Would block IP: <address>` on the Sentinel incident and does not change the WAF.
 
@@ -14,8 +14,8 @@ This is a reference implementation, not a production deployment. A dry-run deplo
 2. Microsoft Sentinel is enabled on that workspace.
 3. A scheduled analytics rule matches the simulated probe and opens an incident with the source IP as an entity.
 4. An automation rule starts a Logic App playbook.
-5. The playbook forwards the incident IP entities to a Python function. The function validates the IP, refuses protected ranges, and in the default configuration only records what it would block.
-6. Opt-in mode adds the IP to one WAF block list custom rule. When that rule already holds 600 addresses, the function uses another rule on the same policy or creates one, then writes the result back on the incident.
+5. The playbook forwards the incident IP entities to the operations web app. The web app validates the IP, refuses protected ranges, and in the default configuration only records what it would block.
+6. After approval, enforce mode adds the IP to one WAF block list custom rule. When that rule already holds 600 addresses, the web app uses another rule on the same policy or creates one, then writes the result back on the incident.
 
 Application Gateway is the **test rig**, because ASE has not confirmed which WAF product is in production. Front Door is a substitutable query and policy shape. This repository does not create Front Door and does not turn on Front Door diagnostics.
 
@@ -57,7 +57,7 @@ test.ps1
 +-------------------------------------------+
     v
 +-------------------------------------------+
-| Python Function, system-assigned MI       |
+| Operations web app, system-assigned MI    |
 | 1. validate one dotted IPv4 address       |
 | 2. reject loopback, RFC1918, link-local,  |
 |    169.254.169.254, CGNAT, protectedIpRanges|
@@ -81,7 +81,7 @@ Front Door path (not deployed):
 
 | Piece | Role |
 | --- | --- |
-| `infra/main.bicep` | Resource group contents: workspace, Sentinel, test WAF, function, playbook, RBAC |
+| `infra/main.bicep` | Resource group contents: workspace, Sentinel, test WAF, playbook, playbook RBAC. It does not create the operations web app |
 | `sentinel/analytics-rules/` | KQL per WAF product and log schema |
 | `sentinel/automation-rules/` | Second deployment. Sentinel rejects `RunPlaybook` until Azure Security Insights can run playbooks |
 | `playbooks/block-malicious-ip/` | Thin Logic App. `workflow.json` is the expression reference and is not deployed |
@@ -97,7 +97,7 @@ More detail is in [docs/architecture.md](docs/architecture.md).
 - Azure CLI 2.89 or newer, with Bicep (this tree was compiled with Bicep 0.47.16).
 - PowerShell 7.
 - A subscription where you can create a resource group, role assignments, and Microsoft Sentinel.
-- Resource providers already registered: `Microsoft.OperationalInsights`, `Microsoft.OperationsManagement`, `Microsoft.SecurityInsights`, `Microsoft.Network`, `Microsoft.Logic`, `Microsoft.Web`, `Microsoft.Storage`, `Microsoft.Insights`. This script does not register them.
+- Resource providers already registered: `Microsoft.OperationalInsights`, `Microsoft.OperationsManagement`, `Microsoft.SecurityInsights`, `Microsoft.Network`, `Microsoft.Logic`, `Microsoft.Web`, `Microsoft.Insights`. This script does not register them. The template does not create a storage account.
 - Rights to assign **Microsoft Sentinel Automation Contributor** to the **Azure Security Insights** service principal on the POC resource group. The script looks that principal up by display name. If the lookup fails, re-run with `-AutomationRuleOnly` after Sentinel is available in the tenant.
 - A region that offers Application Gateway WAF_v2 when you deploy the test rig. `eastus` is the script default.
 - For Front Door, an existing WAF policy resource id and a workspace that already receives that policy's logs. This repo will not create those logs.
@@ -124,7 +124,7 @@ Defaults that matter:
 | `queryFrequencyMinutes` | `5` | Sentinel minimum schedule |
 | `queryLookbackMinutes` | `30` | Observation window |
 | `protectedIpRanges` | empty | Customer ranges, in addition to the built-in ranges |
-| `maximumBlockEntries` | `100` | Cap on the block custom rule |
+| `maximumBlockEntries` | `100` | Accepted so older commands parse. The script does not apply it. The web app setting `MAXIMUM_BLOCK_ENTRIES` is separate |
 | `overrideProtectedRanges` | `false` | Do not skip protected ranges |
 
 Preview without writes:
@@ -139,7 +139,7 @@ Preview without writes:
 
 The script deploys in two phases:
 
-1. `infra/main.bicep` creates the workspace, Sentinel, the test WAF, the playbook, Application Insights on that workspace, Sentinel Responder on the resource group, and Network Contributor on the WAF policy only.
+1. `infra/main.bicep` creates the workspace, Sentinel, the test WAF, and the playbook. The playbook identity receives Microsoft Sentinel Responder on the resource group. The template does not create a Function App, a storage account, or Application Insights, and it does not grant Network Contributor. The live web app already has that role on `wafpol-ase-sentinel-poc`. A future run of this template does not grant it again.
 2. After the Azure Security Insights principal has **Microsoft Sentinel Automation Contributor** (`f4c81013-99ee-4d62-a7ee-b3f1f648599a`) on the resource group, `sentinel/automation-rules/block-malicious-ip.bicep` creates the automation rule. The script waits 30 seconds. If that is not long enough, the rule deployment fails and you re-run `-AutomationRuleOnly`.
 
 Step-by-step notes, including an existing policy, are in [docs/deployment.md](docs/deployment.md).
@@ -211,7 +211,7 @@ When the effective value is not the boolean `true`:
 - Otherwise the incident comment contains the exact text `Would block IP: <address>` (one line per new address, separated by `<br>`).
 - There is no PUT on that path. The WAF policy and any network configuration are unchanged.
 
-A customer range the function cannot evaluate (`/12`, `/10`, `/40`, a value that contains `:`, a bad token, or any prefix outside the allow-list) stops the run before any "Would block" line. That failure is closed: an unparsed allow range must not be treated as public. Allowed customer entries are an IPv4 host or `/8`, `/16`, `/24`, and `/32`.
+A customer range the web app cannot evaluate (`/12`, `/10`, `/40`, a value that contains `:`, a bad token, or any prefix outside the allow-list) stops the run before any "Would block" line. That failure is closed: an unparsed allow range must not be treated as public. Allowed customer entries are an IPv4 host or `/8`, `/16`, `/24`, and `/32`.
 
 ## How blocking and dry-run are selected
 
@@ -224,7 +224,7 @@ Blocking is the default. `-ConfirmAutoBlock` is accepted and is not required. A 
   -AutoBlockEnabled $false
 ```
 
-Bicep writes `AUTO_BLOCK_ENABLED` as the JSON token `true` or `false`. The strings `True` and `False` are not valid JSON and make the function return HTTP 500. This does not rewrite a previous incident. The next newly created incident uses the setting from this deploy.
+`scripts/deploy.ps1` records `autoBlockEnabled` on the deployment output and does not write the web app setting `AUTO_BLOCK_ENABLED`. The engine accepts only the JSON tokens `true` and `false`. The strings `True` and `False` make that request return HTTP 500. This does not rewrite a previous incident.
 
 On success the comment contains `Blocked IP: <address>`, the rule name, the policy id, the list size, rejected addresses, and the Logic App run name. The rule is:
 
@@ -270,9 +270,9 @@ Built-in ranges that are never sent to the block list unless `overrideProtectedR
 | `169.254.0.0/16` and `169.254.169.254/32` | Link-local, including the Azure metadata address |
 | `100.64.0.0/10` | Shared address space / CGNAT |
 
-The analytics rule hard-codes those ranges and also loads watchlist `AseWafIpAllowlist`, which contains the same built-ins plus `protectedIpRanges`. Editing the watchlist cannot drop the built-ins. `overrideProtectedRanges` skips both filters in the KQL and the function. Text that is not a canonical IPv4 address is still rejected. The deploy script requires `-ConfirmOverrideProtectedRanges` before it will set that switch. Leave it false.
+The analytics rule hard-codes those ranges and also loads watchlist `AseWafIpAllowlist`, which contains the same built-ins plus `protectedIpRanges`. Editing the watchlist cannot drop the built-ins. `overrideProtectedRanges` skips both filters in the KQL and the web app. Text that is not a canonical IPv4 address is still rejected. The deploy script requires `-ConfirmOverrideProtectedRanges` before it will set that switch. Leave it false.
 
-Customer `protectedIpRanges` accept a single IPv4 address or `/8`, `/16`, `/24`, `/32`. Any other form is rejected before deployment and fails closed if it is written into the function setting later. `/12` and `/10` stay hard-coded so they are not forced through the customer matcher.
+Customer `protectedIpRanges` accept a single IPv4 address or `/8`, `/16`, `/24`, `/32`. Any other form is rejected before deployment and fails closed if it is written into the web app setting later. `/12` and `/10` stay hard-coded so they are not forced through the customer matcher.
 
 ## Cleanup / destroy
 
@@ -286,14 +286,14 @@ That deletes the workspace, Sentinel, the playbook, the test gateway, and a WAF 
 
 ## Known limitations
 
-- Bicep was built with `az bicep build`. The Application Gateway path was deployed and the analytics query was run against the live workspace. Front Door was not deployed. `autoBlockEnabled` defaults to true, so a new matching incident PUTs the policy. Pass `-AutoBlockEnabled $false` for a dry-run.
+- Bicep was built with `az bicep build`. The Application Gateway path was deployed and the analytics query was run against the live workspace. Front Door was not deployed. The live web app keeps `AUTO_BLOCK_ENABLED` false. A playbook call uses `execution=dry-run`, then `execution=enforce` only after approval. `-AutoBlockEnabled` on the deploy script does not change that app setting.
 - The test gateway is HTTP/80, with dummy backend `192.0.2.10`, no TLS, no NSG, and no availability zones. Those are POC shortcuts. See [docs/production-hardening.md](docs/production-hardening.md).
 - WAF_v2 cost starts when the gateway exists and stops when the resource group delete finishes.
 - Microsoft documents that an Application Gateway custom block rule is logged and **not** enforced while the policy is in Detection mode. The default here is Prevention so the probe returns 403 and the log action can be `Blocked`. The query also accepts `Detected` so a Detection-mode log can still open an incident. If a live workspace shows a different `Action` value, change the query after you see that value. Do not add action names that have not been observed.
 - Front Door log rows use `Block` and `Log`, not `Blocked`. The Front Door queries in this repo follow that. They are not deployed against a Front Door diagnostic setting this repo creates.
 - `AzureFrontDoorWebApplicationFirewallLog` is optional and unconfirmed. The default Front Door query uses `AzureDiagnostics` and `Category == "FrontDoorWebApplicationFirewallLog"`, which is the schema Microsoft documents.
-- The function's customer-range matcher is an IPv4 host or `/8`, `/16`, `/24`, and `/32` only. Any other incident value is rejected and is not written. An incident with no IPv4 address does not GET the policy. A mixed incident still PUTs the IPv4 addresses. An address already stored on the named rule is copied back as an exact string.
-- The deployed playbook is the thin Logic App, which POSTs to the Function App. `workflow.json` is not deployed. A later deploy that must keep existing WAF custom rules uses `-DeployTestWaf $false -ExistingWafPolicyName <policy>`. That deploy leaves the gateway frontend on IPv4.
+- The web app's customer-range matcher is an IPv4 host or `/8`, `/16`, `/24`, and `/32` only. Any other incident value is rejected and is not written. An incident with no IPv4 address does not GET the policy. A mixed incident still PUTs the IPv4 addresses. An address already stored on the named rule is copied back as an exact string.
+- The deployed playbook is the thin Logic App, which POSTs to the operations web app. The workflow parameter names stay `functionUrl` and `functionKey`. `workflow.json` is not deployed. A later deploy that must keep existing WAF custom rules uses `-DeployTestWaf $false -ExistingWafPolicyName <policy>`. That deploy leaves the gateway frontend on IPv4. Do not run `scripts/deploy.ps1` against the live resource group. It redeploys the playbook with an empty `functionKey` and can reset the Office 365 connection.
 - Network Contributor on the policy is wider than "edit one custom rule". A custom role was not invented here.
 - The PUT does not use `If-Match`. A concurrent policy edit can be overwritten. The PUT is not retried.
 - No automatic unblock, no expiry, and no analyst approval gate inside Sentinel. Pass `-AutoBlockEnabled $false` to stop WAF writes.

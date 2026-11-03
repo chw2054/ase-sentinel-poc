@@ -27,9 +27,9 @@
       },
       {
         "id": "respond",
-        "label": "Playbook and function",
+        "label": "Playbook and web app",
         "focus": ["incident", "automation", "playbook", "function", "appgw"],
-        "note": "The thin Logic App posts the IP. The function writes SentinelAutoBlock when auto-block is on."
+        "note": "The thin Logic App posts the IP. The web app writes SentinelAutoBlock when that call is enforce."
       }
     ]
   },
@@ -116,12 +116,12 @@
     {
       "id": "function",
       "type": "backend",
-      "label": "Python function",
+      "label": "Web app",
       "sublabel": "SentinelWafAutoBlock",
       "tag": "decision",
       "col": 0,
       "row": 1,
-      "sources": [{ "path": "function-app/function_app.py", "label": "function app" }]
+      "sources": [{ "path": "webapp/app/live.py", "label": "operations app" }]
     }
   ],
   "boundaries": [
@@ -156,7 +156,7 @@
       "title": "Block default",
       "items": [
         "autoBlockEnabled defaults to true",
-        "The function writes SentinelAutoBlock",
+        "The web app writes SentinelAutoBlock",
         "Pass false at deploy time for a dry-run comment"
       ]
     },

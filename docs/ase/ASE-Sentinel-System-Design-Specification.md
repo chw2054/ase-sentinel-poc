@@ -149,7 +149,7 @@ flowchart LR
 | `office365-playbook-ase-sentinel-poc-block-malicious-ip` | API connection | eastus | Office 365 核准。Bicep 註明必須由核准人在入口網站授權一次 | 資源已在。授權狀態本次未查 |
 | `app-ase-sentinel-poc-7ttpll74` | App Service，Linux，Python 3.11 | centralus | 作業頁面與 `POST /api/SentinelWafAutoBlock`。Running，HTTPS only | 已在 Azure |
 | `app-ase-sentinel-poc-7ttpll74-plan` | App Service plan | centralus | 站點方案 | 已在 Azure。SKU 本次未重讀 |
-| `appi-ase-sentinel-poc` | Application Insights | eastus | 遙測 | 已在 Azure。是否仍接到已刪除的 Function，待確認 |
+| `appi-ase-sentinel-poc` | Application Insights | eastus | 遙測 | 已在 Azure。範本不再建立它。是否仍有資料源，待確認 |
 | `st7ttpll74bmhiq` | Storage | eastus | 原先 Function 部署的儲存體 | 已在 Azure。Function 已不在 |
 | `vnet-app-ase-sentinel-poc-7ttpll74` | Virtual Network | centralus | Web App 的 VNet integration，只剩 `snet-app` | 2026-11-02 重讀。Web App 仍整合到這個子網路。私人端點子網路、其 NSG、私人 DNS 與 Azure SQL 已刪除 |
 
@@ -281,7 +281,7 @@ sequenceDiagram
 - 依賴：ARM `https://management.azure.com`，範圍 `https://management.azure.com/.default`。GET 讀取逾時 20 秒、最多 3 次，只對逾時重試。PUT 逾時預設 120 秒、不重試。HTTP 202 視為失敗，呼叫端必須先讀政策再決定要不要重做。
 - 設定：見第 6 章。缺 `WAF_POLICY_RESOURCE_ID` 或 `WAF_PROVIDER` 時，`config_from_env` 丟出 `ConfigError`，HTTP 500，`status=validation-failed`。
 - 日誌：`status`、`changed`、事件編號與計數。不記錄 Teams URL 或要求本文。
-- Function App 目錄 `function-app/sentinel_waf_block/` 只剩下 `__pycache__`，沒有被 Git 追蹤的 `.py`。`function-app/README.md` 寫明引擎已搬到 Web App。
+- `function-app/` 已從儲存庫移除。引擎只在 `webapp/sentinel_waf_block/`。
 
 ### 4.6 Microsoft 365 核准
 
@@ -444,14 +444,13 @@ Playbook 的 `Select_IP_addresses` 把實體動作選出的位址放進 `ipEntit
 
 ### 7.1 身分與 RBAC
 
-`profiles/poc-approval.json` 描述的角色指派對象是 Function App 與 playbook。Function App 已不在資源群組。這些列是設定檔期望，不是本次重讀到的角色指派。
+`profiles/poc-approval.json` 現在只描述 playbook 的 Microsoft Sentinel Responder。Function 角色列已刪除。這些列是設定檔期望，不是本次重讀到的角色指派。Web App 在政策 `wafpol-ase-sentinel-poc` 上的 Network Contributor 是既有指派，主範本不會建立它，移除模組也不會刪除它。
 
 | 設定檔中的主體 | 角色定義 ID | 範圍 | 本次狀態 |
 | --- | --- | --- | --- |
-| Function 受控識別 | `3e150937-b8fe-4cfb-8069-0eaf05ecd056` Microsoft Sentinel Responder | 資源群組 | 主體已不在。改由 Web App 呼叫 Sentinel 註解。Web App 是否擁有 Responder，待確認 |
-| Playbook 受控識別 | 同上 | 資源群組 | 待確認 |
-| Function 受控識別 | `4d97b98b-1d4f-4787-a291-c67834d212e7` Network Contributor | WAF 政策 | 主體已不在。Web App 若要 PUT，需要這個或同等寫入權。本次未重讀 |
-| Function 對儲存體與 App Insights 的角色 | Storage Blob Data Owner、Storage Queue Data Contributor、Storage Table Data Contributor、Monitoring Metrics Publisher | 舊 Function 支撐資源 | 與目前封鎖路徑無關。是否仍指派，待確認 |
+| Playbook 受控識別 | `3e150937-b8fe-4cfb-8069-0eaf05ecd056` Microsoft Sentinel Responder | 資源群組 | 設定檔仍期望這筆。線上是否存在，本次未重讀 |
+| Web App 受控識別 | `3e150937-b8fe-4cfb-8069-0eaf05ecd056` Microsoft Sentinel Responder | 資源群組 | 不在設定檔。線上是否存在，待確認 |
+| Web App 受控識別 | `4d97b98b-1d4f-4787-a291-c67834d212e7` Network Contributor | WAF 政策 | 不在主範本。既有指派應保留。本次未重讀 |
 
 Playbook 本身不應擁有 WAF 寫入權。`deploy.ps1` 有 `Remove-PlaybookNetworkContributor`。本次未確認該指派已移除。
 
@@ -517,11 +516,11 @@ Playbook 本身不應擁有 WAF 寫入權。`deploy.ps1` 有 `Remove-PlaybookNet
 
 ### 9.2 技術債
 
-- `scripts/deploy.ps1` 仍會打包 `function-app/function_app.py` 與 `host.json`，並要求主部署輸出 Function 名稱與 URL。這兩個檔案不在目前 Git 追蹤清單，Function 資源也不在 Azure。腳本檔頭卻寫「線上封鎖 API 是作業 Web App」。部署腳本與線上架構已分叉。
-- `infra/modules/function.bicep` 仍輸出 `https://<function>/api/SentinelWafAutoBlock`。
+- `scripts/deploy.ps1` 不再打包 Function，也不再要求 Function 輸出。它仍會重布 playbook，並把 `functionKey` 留空。不要對現有資源群組執行。
+- `infra/main.bicep` 不再引用 `function.bicep`。參數 `blockApiUrl` 預設空字串，傳入 workflow 參數 `functionUrl`。參數名稱維持 `functionUrl` 與 `functionKey`。
 - Azure SQL、私人 DNS 與私人端點已於 2026-11-02 刪除。`vnet-app-ase-sentinel-poc-7ttpll74` 仍在，因為 Web App 整合在 `snet-app`。
 - 分析規則只排除精確的 `SentinelAutoBlock`。延伸規則 `SentinelAutoBlock-2` 的阻擋日誌可能再被計入探測查詢。目前線上沒有延伸規則。
-- 文件 `docs/architecture.md` 與 `README.md` 有部分句子仍把呼叫對象稱為 Function。以 `thin-workflow.json` 的 `functionUrl` 參數與線上 URL 主機為準：參數名稱沿用 function，目標是 Web App。
+- workflow 參數名稱維持 `functionUrl` 與 `functionKey`。目標是作業 Web App，不是 Function App。
 
 ### 9.3 正式環境前必須補上的保護
 
@@ -543,13 +542,13 @@ Playbook 本身不應擁有 WAF 寫入權。`deploy.ps1` 有 `Remove-PlaybookNet
 - `webapp/sentinel_waf_block/engine.py`、`service.py`、`models.py`、`waf_arm.py`、`addresses.py`、`comments.py`、`notifiers.py`、`config.py`、`azure_clients.py`、`decision.py`
 - `webapp/app/main.py`、`webapp/app/live.py`、`webapp/app/config.py`
 - `playbooks/block-malicious-ip/thin-workflow.json`
-- `infra/modules/playbook.bicep`、`waf.bicep`、`sentinel.bicep`、`function.bicep`
+- `infra/modules/playbook.bicep`、`waf.bicep`、`sentinel.bicep`、`webapp.bicep`
 - `infra/main.bicep`、`infra/parameters/main.bicepparam`
 - `sentinel/automation-rules/block-malicious-ip.bicep`
 - `sentinel/analytics-rules/simulated-probe.application-gateway.kql`
 - `scripts/deploy.ps1`、`scripts/test.ps1`
 - `profiles/poc-approval.json`
-- `function-app/README.md`、`playbooks/block-malicious-ip/README.md`
+- `playbooks/block-malicious-ip/README.md`
 
 ### 10.2 本次 Azure 唯讀
 

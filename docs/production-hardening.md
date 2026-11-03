@@ -11,7 +11,7 @@ Items below are recommendations for a later design. They are not implemented in 
 
 ## Replace dry-run with an approval, not with an always-on PUT
 
-This POC uses `autoBlockEnabled` as the only gate. A production automation rule should require an analyst action, or a separate approved playbook, before `autoBlockEnabled` is true. Record who approved the change on the incident. The current automation rule labels the incident and starts the playbook immediately. The playbook forwards the incident to the Function App.
+This POC uses the playbook approval and the web app flag as the gates. Record who approved the change on the incident. The current automation rule labels the incident and starts the playbook immediately. The playbook forwards the incident to the operations web app and waits for Office 365 approval before `execution=enforce`.
 
 ## Narrow the write permission
 

@@ -4501,7 +4501,7 @@
       <p class="subtitle">Application Gateway test rig. autoBlockEnabled defaults to true.</p>
     </div>
 
-    <script id="archify-guided-views-data" type="application/json">[{"id":"probe","label":"Probe and WAF log","focus":["probe","appgw","logs"],"note":"The simulated GET is blocked and written to AGWFirewallLogs."},{"id":"detect","label":"Detect and open incident","focus":["logs","rule","incident"],"note":"The scheduled rule groups one incident on the client IP."},{"id":"respond","label":"Playbook and function","focus":["incident","automation","playbook","function","appgw"],"note":"The thin Logic App posts the IP. The function writes SentinelAutoBlock when auto-block is on."}]</script>
+    <script id="archify-guided-views-data" type="application/json">[{"id":"probe","label":"Probe and WAF log","focus":["probe","appgw","logs"],"note":"The simulated GET is blocked and written to AGWFirewallLogs."},{"id":"detect","label":"Detect and open incident","focus":["logs","rule","incident"],"note":"The scheduled rule groups one incident on the client IP."},{"id":"respond","label":"Playbook and web app","focus":["incident","automation","playbook","function","appgw"],"note":"The thin Logic App posts the IP. The web app writes SentinelAutoBlock when that call is enforce."}]</script>
     <script id="archify-source-evidence-data" type="application/json">{"schemaVersion":1,"verified":true,"repository":{"url":"https://github.com/chw2054/ase-sentinel-poc","revision":"bfa302ccd02b3df1d420afdde70d996cc6c477b0","shortRevision":"bfa302c"},"referenceCount":8,"nodes":{"probe":[{"path":"scripts/test.ps1","label":"test script","href":"https://github.com/chw2054/ase-sentinel-poc/blob/bfa302ccd02b3df1d420afdde70d996cc6c477b0/scripts/test.ps1"}],"appgw":[{"path":"infra/modules/waf.bicep","label":"WAF module","href":"https://github.com/chw2054/ase-sentinel-poc/blob/bfa302ccd02b3df1d420afdde70d996cc6c477b0/infra/modules/waf.bicep"}],"logs":[{"path":"infra/modules/log-analytics.bicep","label":"workspace","href":"https://github.com/chw2054/ase-sentinel-poc/blob/bfa302ccd02b3df1d420afdde70d996cc6c477b0/infra/modules/log-analytics.bicep"}],"rule":[{"path":"sentinel/analytics-rules/simulated-probe.application-gateway.kql","label":"KQL","href":"https://github.com/chw2054/ase-sentinel-poc/blob/bfa302ccd02b3df1d420afdde70d996cc6c477b0/sentinel/analytics-rules/simulated-probe.application-gateway.kql"}],"incident":[{"path":"infra/modules/sentinel.bicep","label":"Sentinel module","href":"https://github.com/chw2054/ase-sentinel-poc/blob/bfa302ccd02b3df1d420afdde70d996cc6c477b0/infra/modules/sentinel.bicep"}],"automation":[{"path":"sentinel/automation-rules/block-malicious-ip.bicep","label":"automation rule","href":"https://github.com/chw2054/ase-sentinel-poc/blob/bfa302ccd02b3df1d420afdde70d996cc6c477b0/sentinel/automation-rules/block-malicious-ip.bicep"}],"playbook":[{"path":"playbooks/block-malicious-ip/thin-workflow.json","label":"deployed playbook","href":"https://github.com/chw2054/ase-sentinel-poc/blob/bfa302ccd02b3df1d420afdde70d996cc6c477b0/playbooks/block-malicious-ip/thin-workflow.json"}],"function":[{"path":"function-app/function_app.py","label":"function app","href":"https://github.com/chw2054/ase-sentinel-poc/blob/bfa302ccd02b3df1d420afdde70d996cc6c477b0/function-app/function_app.py"}]}}</script>
     <div class="guided-views no-print" id="guided-views" hidden aria-label="Guided diagram views">
       <button id="guided-view-prev" type="button" aria-label="Previous guided view" title="Previous guided view ([)">&#8592;</button>
@@ -4671,14 +4671,14 @@
         <text data-detail="fine" x="344" y="272" class="t-backend" font-size="7" text-anchor="middle">playbook</text>
         </g>
 
-        <g id="node-function" data-node-id="function" data-node-label="Python function" tabindex="0" role="button" aria-label="Focus Python function, SentinelWafAutoBlock, rg-ase-sentinel-poc / East US" aria-pressed="false" data-node-kind="backend" data-node-sublabel="SentinelWafAutoBlock" data-node-tag="decision" data-node-context="rg-ase-sentinel-poc / East US">
-          <title>Python function · SentinelWafAutoBlock · rg-ase-sentinel-poc / East US · decision</title>
+        <g id="node-function" data-node-id="function" data-node-label="Web app" tabindex="0" role="button" aria-label="Focus Web app, SentinelWafAutoBlock, rg-ase-sentinel-poc / East US" aria-pressed="false" data-node-kind="backend" data-node-sublabel="SentinelWafAutoBlock" data-node-tag="decision" data-node-context="rg-ase-sentinel-poc / East US">
+          <title>Web app · SentinelWafAutoBlock · rg-ase-sentinel-poc / East US · decision</title>
           <rect x="48" y="220" width="120" height="60" rx="6" class="c-mask"/>
           <rect x="48" y="220" width="120" height="60" rx="6" class="c-backend" stroke-width="1.5"/>
           <g aria-hidden="true" data-semantic-sigil="backend" class="semantic-sigil s-backend" transform="translate(54 226) scale(0.6875)">
             <path d="M6 3 3 8l3 5M10 3l3 5-3 5"/>
           </g>
-          <text data-detail-anchor x="108" y="248" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">Python function</text>
+          <text data-detail-anchor x="108" y="248" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">Web app</text>
         <text data-detail="context" x="108" y="264" class="t-muted" font-size="9" text-anchor="middle">SentinelWafAutoBlock</text>
         <text data-detail="fine" x="108" y="272" class="t-backend" font-size="7" text-anchor="middle">decision</text>
         </g>
@@ -4943,7 +4943,7 @@
         </div>
         <ul>
           <li>&bull; autoBlockEnabled defaults to true</li>
-          <li>&bull; The function writes SentinelAutoBlock</li>
+          <li>&bull; The web app writes SentinelAutoBlock</li>
           <li>&bull; Pass false at deploy time for a dry-run comment</li>
         </ul>
       </div>

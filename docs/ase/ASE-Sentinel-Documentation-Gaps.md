@@ -8,9 +8,9 @@
 
 | ID | 優先順序 | 元件 | 說明 | 建議動作 | 來源 |
 | --- | --- | --- | --- | --- | --- |
-| G-1 | P1 | 部署腳本與 Function | `scripts/deploy.ps1` 仍複製 `function-app/function_app.py` 與 `host.json`，並要求主部署輸出 Function 名稱與 URL。這兩個檔案未被 Git 追蹤。ARM 讀取 `fn-ase-sentinel-poc-7ttpll74` 回 `ResourceNotFound`。腳本檔頭卻寫線上 API 是 Web App | 不要執行該腳本。另寫一條只發布 `webapp/`、不重布 WAF 與 playbook 連接器的程序，或凍結現有站點的可重建套件 | `scripts/deploy.ps1` 的 `Publish-BlockFunction`；`function-app/README.md`；本次 ARM |
+| G-1 | P1 | 部署腳本 | `scripts/deploy.ps1` 不再複製 Function 檔案，主範本也不再建立 Function。腳本仍會重布 playbook。空的 `functionKey` 會清掉線上金鑰，也可能重置 Office 365。Web App 發布程序仍未寫進腳本 | 不要對現有資源群組執行該腳本。另寫一條只發布 `webapp/`、不重布 WAF 與 playbook 連接器的程序 | `scripts/deploy.ps1`；`infra/main.bicep` |
 | G-2 | P1 | 基礎結構 | `infra/main.bicep` 不參考 `infra/modules/webapp.bicep`。線上 Web App、centralus 方案與 `vnet-app-ase-sentinel-poc-7ttpll74` 沒有由目前主範本證明的部署路徑。Azure SQL 與私人端點已刪除，`webapp.bicep` 也不再描述它們 | 把 Web App 標成既有資源，不要靠現有主範本重建。補部署程序前不要把 `webapp.bicep` 部署到這個資源群組 | `infra/main.bicep`、資源清單 |
-| G-3 | P2 | 引擎位置 | `function-app/sentinel_waf_block/` 只剩 `__pycache__`。執行中的原始碼在 `webapp/sentinel_waf_block/` | 清掉未追蹤的 pyc，避免讀者把快取當成來源 | 目錄清單與 `git ls-files` |
+| G-3 | P2 | 引擎位置 | `function-app/` 已從儲存庫移除。執行中的原始碼在 `webapp/sentinel_waf_block/` | 不要把舊的本機快取當成來源 | `webapp/sentinel_waf_block/` |
 | G-4 | P2 | 第二份政策 | `wafpol-ase-sentinel-poc-2` 存在，0 條自訂規則，`ManagedBy=manual`，沒有 `ase-sentinel-block-list=true`。引擎只 PUT `WAF_POLICY_RESOURCE_ID` | 請資源擁有者說明用途。沒有用途就不要在文件或複製程序中把它當成封鎖目標 | 本次政策讀取；`service.execute_payload` |
 | G-5 | P2 | 範本 | `docs/模組設計說明書範本 v0.1.docx` 是 OLE 檔，不是 OOXML，無法抽出章節 | 若必須符合該範本，請提供未加密的 `.docx`。本次三份 Markdown 依任務大綱撰寫 | 檔頭 `D0 CF 11 E0` |
 
@@ -18,14 +18,14 @@
 
 | ID | 優先順序 | 元件 | 說明 | 建議動作 | 來源 |
 | --- | --- | --- | --- | --- | --- |
-| G-6 | P1 | RBAC | Function 的 Network Contributor 與 Sentinel Responder 設定在 `profiles/poc-approval.json`，主體已不存在。Web App 與 playbook 的實際角色指派本次沒有讀 | 列出 Web App 系統受控識別在政策與資源群組上的角色。確認 playbook 沒有 WAF 寫入權 | `profiles/poc-approval.json`；`scripts/deploy.ps1` 的 `Remove-PlaybookNetworkContributor` |
+| G-6 | P1 | RBAC | 設定檔只保留 playbook 的 Sentinel Responder。Function 角色列已刪除。Web App 的 Network Contributor 是既有指派，主範本不會建立它。本次文件更新沒有重讀線上角色 | 列出 Web App 系統受控識別在政策與資源群組上的角色。確認 playbook 沒有 WAF 寫入權 | `profiles/poc-approval.json`；`scripts/deploy.ps1` 的 `Remove-PlaybookNetworkContributor` |
 | G-7 | P1 | Easy Auth | 封鎖 API 依賴 Easy Auth 排除 `/api/SentinelWafAutoBlock`，頁面則應要求登入。本次沒有讀 authsettings，也沒有呼叫 `/health` | 唯讀匯出排除路徑與未登入時的 `unauthenticatedClientAction`。用無金鑰的 POST 確認得到 401，而不是匿名執行引擎 | `webapp/app/live.py`；`webapp/README.md` |
 | G-8 | P2 | Office 365 連接器 | 連接器資源在線上。是否仍為核准人已授權，本次未查 | 在入口網站看連接器狀態。不要重新部署 playbook 來「修復」 | `infra/modules/playbook.bicep` |
 | G-9 | P2 | 分析規則與自動化規則 | workspace 子資源沒有出現在資源群組清單。門檻 3、5 分鐘、30 分鐘回看、12 小時分組只存在於參數與 Bicep | 讀這兩條規則的 `enabled`、查詢、`triggersWhen` 與分析規則條件 | `infra/modules/sentinel.bicep`；`sentinel/automation-rules/block-malicious-ip.bicep` |
 | G-10 | P2 | 診斷設定 | `diag-waf-to-sentinel` 與 `diag-playbook-runtime` 只在設定檔 | 確認防火牆日誌類別仍送到 `log-ase-sentinel-poc-7ttpll74bmhiq`，且目標類型是 Dedicated | `profiles/poc-approval.json` |
 | G-11 | P2 | 閘道綁定 | 公開 IP 位址、WAF policy 與 `agw-ase-sentinel-poc` 的關聯、SKU、後端是否仍為 `192.0.2.10`，本次未重讀。後端位址只在 Bicep 證實為設計值 | 讀閘道的 `firewallPolicy`、frontend IP 與 backend pool | `infra/modules/waf.bicep` |
 | G-12 | P2 | Teams | `NOTIFY_TEAMS_URL` 與 `NOTIFY_TEAMS_AUTH=entra` 已設定。本次沒有收到或看到卡片 | 用下一筆非破壞性的 dry-run 確認卡片 Status 為 `awaiting-approval`，且政策 match value 數量不變 | `webapp/sentinel_waf_block/notifiers.py` |
-| G-13 | P3 | App Insights 與儲存體 | `appi-ase-sentinel-poc` 與 `st7ttpll74bmhiq` 仍在，Function 已不在 | 確認 Web App 是否寫入這份 App Insights，或兩者都是殘留 | 資源清單 |
+| G-13 | P3 | App Insights 與儲存體 | `appi-ase-sentinel-poc` 與 `st7ttpll74bmhiq` 仍在。範本已不再建立它們。增量 Bicep 不會刪除殘留資源 | 確認 Web App 是否使用它們之後，再決定是否從 Azure 刪除。不要在未確認前刪除 | 資源清單；`infra/main.bicep` |
 | G-14 | P3 | `ARM_API_VERSION` 與 `BLOCK_POLICY_TAG` 的線上值 | 設定名稱存在，本次摘要沒有印出值。程式預設分別是 `2024-05-01` 與 `ase-sentinel-block-list` | 核對線上值與預設是否相同。標籤目前不被 PUT 路徑用來選擇多份政策 | Web App 設定名稱清單；`config.py` |
 
 ## 3. 缺少的部署自動化
@@ -33,7 +33,7 @@
 | ID | 優先順序 | 元件 | 說明 | 建議動作 | 來源 |
 | --- | --- | --- | --- | --- | --- |
 | G-15 | P1 | Web App 發布 | 沒有已驗證的指令可從 `webapp/` 建置並發布到 `app-ase-sentinel-poc-7ttpll74`，同時不改 WAF、不重設 Office 365 | 把實際使用過的發布步驟寫進腳本或執行手冊，並在非現有政策的資源群組演練 | `scripts/deploy.ps1` 與線上 URL 主機的差異 |
-| G-16 | P1 | 主範本輸出 | 腳本在非 what-if 路徑要求 `functionAppName` 與 `functionUrl`。主範本仍輸出 Function URL | 改輸出為 Web App 的封鎖 URL，或讓腳本在缺少 Function 時停止於說明文字，而不是丟出部署中的例外 | `infra/modules/function.bicep`；`scripts/deploy.ps1` |
+| G-16 | P1 | 主範本輸出 | 主範本不再輸出 Function。參數 `blockApiUrl` 預設空字串，傳入 playbook 的 `functionUrl`。空值會把新部署的 playbook URL 清成空，且 `functionKey` 仍是空的 | 不要對現有群組執行主範本。新環境要明確傳入 Web App 的封鎖 URL，並在範本之外設定 `functionKey` | `infra/main.bicep`；`scripts/deploy.ps1` |
 | G-17 | P2 | 自動化規則的獨立部署 | Bicep 註明必須等 Azure Security Insights 有 Automation Contributor 之後才能 `RunPlaybook`。這段沒有在本次環境重做 | 在第二座工廠把這個失敗模式寫進執行手冊，並記錄服務主體物件 ID 的取得方式 | `sentinel/automation-rules/block-malicious-ip.bicep` |
 | G-18 | P3 | CI | 儲存庫沒有看到會發布這條路徑的 CI 設定。本次沒有把「沒有 CI」擴大解釋成已搜尋每一個外部系統 | 若有 Azure DevOps 或 GitHub Actions 在儲存庫外，請補連結。儲存庫內目前以腳本為準 | 儲存庫佈局 |
 

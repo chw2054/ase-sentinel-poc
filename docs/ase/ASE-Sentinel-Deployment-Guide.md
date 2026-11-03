@@ -24,7 +24,7 @@
 不支援由本儲存庫建立：
 
 - Front Door 本體與 Front Door 診斷設定。`scripts/deploy.ps1` 在 `DeployTestWaf` 與 Front Door 同時為真時會丟出錯誤。
-- 以目前腳本重新發布封鎖引擎。腳本仍複製 `function-app/function_app.py` 與 `function-app/host.json`。這兩個路徑不在 Git 追蹤檔清單。Function App 資源也不在資源群組。
+- 以 `scripts/deploy.ps1` 重新發布封鎖引擎或重建現有 playbook。腳本不再複製 Function 檔案，但仍會重布 playbook，並把 `functionKey` 留空。
 
 `infra/modules/webapp.bicep` 沒有被 `infra/main.bicep` 引用。線上 Web App 是既有資源，不是這次文件撰寫時由該 Bicep 模組證明出來的部署。
 
@@ -76,10 +76,10 @@ Microsoft Sentinel、Log Analytics、Application Gateway WAF_v2、Logic Apps、A
 | `office365-playbook-...` | `Microsoft.Web/connections` | 核准信 | 核准人授權 | 同上 |
 | `app-ase-sentinel-poc-7ttpll74` | `Microsoft.Web/sites` | 引擎與作業頁面 | 政策的 RBAC、App Settings | 線上已存在。`infra/main.bicep` 不部署它 |
 | `app-ase-sentinel-poc-7ttpll74-plan` | `Microsoft.Web/serverFarms` | 方案 | 無 | 同上。SKU 本次未重讀 |
-| `appi-ase-sentinel-poc` | Application Insights | 遙測 | workspace | `infra` 模組。是否仍有資料源，待確認 |
-| `st7ttpll74bmhiq` | Storage | 舊 Function 支撐 | 無現行 Function | `profiles/poc-approval.json` |
+| `appi-ase-sentinel-poc` | Application Insights | 遙測 | workspace | 範本不再建立。是否仍有資料源，待確認。增量部署不會刪除它 |
+| `st7ttpll74bmhiq` | Storage | 舊 Function 支撐 | 無現行 Function | 範本不再建立。設定檔不再期望它。增量部署不會刪除它 |
 | `vnet-app-ase-sentinel-poc-7ttpll74` | Virtual Network | Web App 的 VNet integration，子網路 `snet-app` | Web App | 2026-11-02 刪除 Azure SQL、私人端點、私人 DNS 與私人端子網路後仍保留。`infra/main.bicep` 不部署它 |
-| `fn-ase-sentinel-poc-7ttpll74` | Function App | 舊進入點 | 不存在 | `infra/modules/function.bicep` 仍描述它 |
+| `fn-ase-sentinel-poc-7ttpll74` | Function App | 舊進入點 | 不存在 | 範本已移除。線上資源不存在 |
 
 分析規則與自動化規則是 workspace 子資源，不會出現在資源群組的一般 `az resource list` 結果。名稱期望值：
 
@@ -94,10 +94,10 @@ Microsoft Sentinel、Log Analytics、Application Gateway WAF_v2、Logic Apps、A
 
 ### 4.1 資源群組與主範本
 
-- 目的：建立 workspace、Sentinel、測試 WAF、Function、playbook 骨架。
-- 現況：資源群組已存在，且內容已偏離主範本的 Function 路徑。
+- 目的：建立 workspace、Sentinel、測試 WAF、playbook 骨架。
+- 現況：資源群組已存在。主範本不再建立 Function。
 - 儲存庫命令形狀寫在 `README.md`：`./scripts/deploy.ps1 -ResourceGroupName rg-ase-sentinel-poc -Location eastus`。
-- 預期：新資源群組會得到測試閘道與 Function。對**現有**群組的預期是連接器被重置、Function 發布失敗。
+- 預期：新資源群組會得到測試閘道與 playbook，不會得到 Function。對**現有**群組的預期是連接器被重置，且 playbook 的 `functionKey` 被清成空。
 - 驗證：不要執行。若只做 what-if，腳本有 `-WhatIf`，且與 `-AutomationRuleOnly` 互斥。本次未執行 what-if。
 - 常見問題：CLI 訂用帳戶錯了會找不到資源群組。
 
@@ -127,7 +127,7 @@ Microsoft Sentinel、Log Analytics、Application Gateway WAF_v2、Logic Apps、A
 
 - 目的：驗證 IP、讀寫 WAF、寫註解、送 Teams。
 - 現況：由 Web App 提供。`APP_ENV=production`，`LIVE_AZURE=true`，`AUTO_BLOCK_ENABLED=false`，`WAF_PROVIDER=ApplicationGateway`。儲存庫已不讀 `LIVE_AZURE`。線上設定仍留 `true`，因為目前部署的程式在重啟時還會讀它。
-- 儲存庫沒有一條已核對過、可把 `webapp/` 發布到這個站點的腳本。`scripts/deploy.ps1` 的 `Publish-BlockFunction` 仍指向 Function。
+- 儲存庫沒有一條已核對過、可把 `webapp/` 發布到這個站點的腳本。`scripts/deploy.ps1` 不再發布 Function，也不發布這個 Web App。
 - 發布缺口標為缺少自動化。在補上之前，變更引擎必須沿用當初發布 Web App 的程序，而該程序沒有寫進目前腳本。
 - 驗證：`GET /health` 在程式中回 `liveAzure: true`。該路徑是否被 Easy Auth 排除，本次未測，所以不把 HTTP 200 寫成本次結果。
 
@@ -306,7 +306,7 @@ PUT 必須包含原有的 `location`、`tags`、`policySettings`、`customRules`
 - 一筆 Reject 的 run 連結已存檔。
 - 一筆 Approve 的政策 diff 已存檔，並標明回復方式。
 - 部署腳本的缺口已告知：不能靠 `deploy.ps1` 重建 Web App 路徑。
-- Azure SQL 已刪除。Function App 仍不在資源群組，但 `scripts/deploy.ps1` 仍描述它。
+- Azure SQL 已刪除。Function App 不在資源群組，範本也不再描述它。`scripts/deploy.ps1` 仍不應用來重建現有群組。
 
 ## 10. 正式環境準備度
 

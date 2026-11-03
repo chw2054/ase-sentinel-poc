@@ -33,7 +33,7 @@ The test is a repeatable GET. It does not depend on malicious traffic. Default `
 
 6. **The automation rule triggers.** The incident is Active and labeled `poc-simulated-probe`. The rule runs only for this analytics rule, and only when the incident is created.
 
-7. **The playbook receives the IP.** Open the Logic App run. `Entities - Get IPs` should list the same address as the incident entity, and `Call_block_function` should return the function JSON. The function writes the incident comment. The Logic App writes a comment only when that call does not finish.
+7. **The playbook receives the IP.** Open the Logic App run. `Entities - Get IPs` should list the same address as the incident entity, and `Call_block_function` should return the web app JSON. The web app writes the incident comment. The Logic App writes a comment only when that call does not finish. The action name stays `Call_block_function`.
 
 8. **The default deploy blocks the address.** The incident comment contains `Blocked IP: <address>`. A failed PUT comment says not to assume the address was blocked. Read the policy before retrying. Confirm the rule:
 
