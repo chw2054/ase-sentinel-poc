@@ -9,7 +9,6 @@ ROOT = Path(__file__).resolve().parents[3]
 THIN = ROOT / "playbooks" / "block-malicious-ip" / "thin-workflow.json"
 REFERENCE = ROOT / "playbooks" / "block-malicious-ip" / "workflow.json"
 PLAYBOOK = ROOT / "infra" / "modules" / "playbook.bicep"
-FUNCTION = ROOT / "infra" / "modules" / "function.bicep"
 MAIN = ROOT / "infra" / "main.bicep"
 
 
@@ -87,26 +86,24 @@ def test_thin_playbook_does_not_decide_or_write_the_policy() -> None:
     assert "Would block IP:" in reference
 
 
-def test_bicep_deploys_the_function_and_keeps_the_logic_app_thin() -> None:
+def test_bicep_keeps_the_logic_app_thin_and_does_not_deploy_a_function() -> None:
     playbook = PLAYBOOK.read_text(encoding="utf-8")
-    function = FUNCTION.read_text(encoding="utf-8")
     main = MAIN.read_text(encoding="utf-8")
     assert "thin-workflow.json" in playbook
     assert "role-waf-policy.bicep" not in playbook
     assert "office365" in playbook
     assert "approverEmail" in playbook
-    assert "modules/function.bicep" in main
-    assert "AUTO_BLOCK_ENABLED" in function
-    assert "autoBlockEnabled ? 'true' : 'false'" in function
-    assert "string(autoBlockEnabled)" not in function
-    assert "string(overrideProtectedRanges)" not in function
-    assert "APPLICATIONINSIGHTS_CONNECTION_STRING" in function
-    assert "APPLICATIONINSIGHTS_AUTHENTICATION_STRING" in function
-    assert "Authorization=AAD" in function
-    assert "3913510d-42f4-4e42-8a64-420c390055eb" in function
-    assert "Microsoft.Insights/components@2020-02-02" in function
+    assert "param functionUrl string" in playbook
+    assert "param functionKey string" in playbook
+    assert "BLOCK_API_KEY" in playbook
+    assert "modules/function.bicep" not in main
+    assert "function.bicep" not in main
+    assert "Microsoft.Storage/storageAccounts" not in main
+    assert "Microsoft.Insights/components" not in main
+    assert "functionUrl: blockApiUrl" in main
+    assert "functionKey: ''" in main
+    assert "param blockApiUrl string = ''" in main
     assert "param autoBlockEnabled bool = true" in main
-    assert "3e150937-b8fe-4cfb-8069-0eaf05ecd056" in function
-    assert "role-waf-policy.bicep" in function
-    assert "FC1" in function
-    assert "version: '3.11'" in function
+    assert "3e150937-b8fe-4cfb-8069-0eaf05ecd056" in playbook
+    assert not (ROOT / "infra" / "modules" / "function.bicep").exists()
+    assert not (ROOT / "infra" / "modules" / "role-waf-policy.bicep").exists()

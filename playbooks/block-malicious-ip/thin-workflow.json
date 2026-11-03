@@ -206,7 +206,7 @@
                   "inputs": {
                     "body": {
                       "incidentArmId": "@triggerBody()?['object']?['id']",
-                      "message": "<p><strong>ASE POC playbook could not complete the Python workload call.</strong> Do not assume the WAF policy was changed. Read the policy and the Function App logs before retrying.</p><p>Logic App run: @{workflow()['run']['name']}</p>"
+                      "message": "<p><strong>ASE POC playbook could not complete the Python workload call.</strong> Do not assume the WAF policy was changed. Read the policy and the operations web app logs before retrying.</p><p>Logic App run: @{workflow()['run']['name']}</p>"
                     },
                     "host": {
                       "connection": {
@@ -349,7 +349,7 @@
                           "inputs": {
                             "body": {
                               "incidentArmId": "@triggerBody()?['object']?['id']",
-                              "message": "<p><strong>ASE POC playbook could not complete the approved block request.</strong> The approval was given, but the second Python workload call failed. Do not assume the WAF policy was changed. Read the policy and the Function App logs before retrying.</p><p>Logic App run: @{workflow()['run']['name']}</p>"
+                              "message": "<p><strong>ASE POC playbook could not complete the approved block request.</strong> The approval was given, but the second Python workload call failed. Do not assume the WAF policy was changed. Read the policy and the operations web app logs before retrying.</p><p>Logic App run: @{workflow()['run']['name']}</p>"
                             },
                             "host": {
                               "connection": {

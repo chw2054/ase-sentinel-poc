@@ -4,10 +4,10 @@ param location string
 @description('Logic App workflow name. Sentinel shows this name as the playbook.')
 param playbookName string
 
-@description('HTTPS URL of POST /api/SentinelWafAutoBlock. Empty keeps the playbook from calling the function.')
+@description('HTTPS URL of POST /api/SentinelWafAutoBlock on the operations web app. Empty keeps the playbook from calling it. The workflow parameter name stays functionUrl.')
 param functionUrl string
 
-@description('Function key for AuthLevel.FUNCTION. Empty fails the HTTP call. The playbook does not log this value.')
+@description('Value of the web app setting BLOCK_API_KEY, sent as x-functions-key. Empty fails the HTTP call. The playbook does not log this value. The workflow parameter name stays functionKey.')
 @secure()
 param functionKey string
 
@@ -126,7 +126,7 @@ resource sentinelResponder 'Microsoft.Authorization/roleAssignments@2022-04-01' 
     roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', sentinelResponderRoleId)
     principalId: playbook.identity.principalId
     principalType: 'ServicePrincipal'
-    description: 'Lets the playbook read incident IP entities and comment when the function call does not finish.'
+    description: 'Lets the playbook read incident IP entities and comment when the block API call does not finish.'
   }
 }
 

@@ -1,8 +1,11 @@
 # Deploys the ASE WAF -> Sentinel -> block proof of concept.
-# The live block API is the operations web app, not a Function App.
+# The live block API is the operations web app. This script does not create or
+# publish a Function App, and it does not write the web app's app settings.
 # Do not run this script against the live resource group: the main template
-# redeploys the playbook and can reset the Office 365 connection.
-# AUTO_BLOCK_ENABLED defaults to the JSON boolean true. Pass -AutoBlockEnabled $false for dry-run.
+# redeploys the playbook with an empty functionKey and can reset the Office 365
+# connection. An empty -BlockApiUrl also clears the playbook parameter functionUrl.
+# -AutoBlockEnabled is recorded on the deployment output only. It does not change
+# the web app setting AUTO_BLOCK_ENABLED.
 # Requires Azure CLI, a subscription, and rights to create the resource group,
 # role assignments, and Microsoft Sentinel. This script does not register resource providers.
 #requires -Version 7.0
@@ -25,6 +28,9 @@ param(
     # The playbook stops fail-closed when this is empty: no approver, no block.
     [ValidatePattern('^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$')]
     [string] $ApproverEmail = '',
+    # HTTPS URL of POST /api/SentinelWafAutoBlock. Empty leaves the playbook
+    # parameter functionUrl empty. The workflow parameter name stays functionUrl.
+    [string] $BlockApiUrl = '',
     [ValidateSet('AzureDiagnostics', 'ResourceSpecific')]
     [string] $FrontDoorLogDestination = 'AzureDiagnostics',
     [ValidateSet('Prevention', 'Detection')]
@@ -36,6 +42,8 @@ param(
     [bool] $OverrideProtectedRanges = $false,
     [switch] $ConfirmOverrideProtectedRanges,
     [string[]] $ProtectedIpRanges = @(),
+    # Accepted so older commands still parse. The template no longer creates a
+    # Function App, and this script does not write this value onto the web app.
     [ValidateRange(1, 500)]
     [int] $MaximumBlockEntries = 100,
     [ValidateRange(1, 100)]
@@ -101,11 +109,17 @@ if ($WafProvider -eq 'FrontDoor' -and $FrontDoorLogDestination -eq 'ResourceSpec
 if ($WafMode -eq 'Detection') {
     Write-Warning 'Detection mode logs an Application Gateway custom block rule and does not enforce it. The analytics rule accepts Action Blocked or Detected. A Prevention-mode test is what produces HTTP 403.'
 }
+if (-not [string]::IsNullOrWhiteSpace($BlockApiUrl) -and $BlockApiUrl -notmatch '^https://') {
+    throw 'BlockApiUrl must be empty or an https URL of POST /api/SentinelWafAutoBlock.'
+}
 if ($AutoBlockEnabled) {
-    Write-Warning 'autoBlockEnabled is true. The next matching incident will PUT the WAF policy.'
+    Write-Warning 'autoBlockEnabled is recorded as true on the deployment output. This script does not change the operations web app setting AUTO_BLOCK_ENABLED.'
 }
 else {
-    Write-Warning 'autoBlockEnabled is false. This deployment stays in dry-run and does not PUT the WAF policy.'
+    Write-Warning 'autoBlockEnabled is recorded as false on the deployment output. This script does not change the operations web app setting AUTO_BLOCK_ENABLED.'
+}
+if (-not [string]::IsNullOrWhiteSpace($NotifyTeamsUrl) -or $NotifyEvents -ne 'blocked,put_failed,capacity') {
+    Write-Warning 'NotifyTeamsUrl and NotifyEvents are not written by this script. Set NOTIFY_TEAMS_URL, NOTIFY_TEAMS_AUTH, and NOTIFY_EVENTS on the operations web app.'
 }
 
 . (Join-Path $PSScriptRoot 'ip-ranges.ps1')
@@ -146,131 +160,6 @@ function Invoke-AzCli {
     }
 }
 
-function Publish-BlockFunction {
-    param(
-        [Parameter(Mandatory)]
-        [string] $ResourceGroupName,
-        [Parameter(Mandatory)]
-        [string] $FunctionAppName,
-        [Parameter(Mandatory)]
-        [string] $RepoRoot
-    )
-    $stamp = [guid]::NewGuid().ToString('n')
-    $stage = Join-Path ([System.IO.Path]::GetTempPath()) "ase-sentinel-poc-func-$stamp"
-    $zip = Join-Path ([System.IO.Path]::GetTempPath()) "ase-sentinel-poc-func-$stamp.zip"
-    $source = Join-Path $RepoRoot 'function-app'
-    New-Item -ItemType Directory -Path $stage | Out-Null
-    try {
-        Copy-Item -Path (Join-Path $source 'function_app.py') -Destination $stage
-        Copy-Item -Path (Join-Path $source 'host.json') -Destination $stage
-        Copy-Item -Path (Join-Path $source 'sentinel_waf_block') -Destination (Join-Path $stage 'sentinel_waf_block') -Recurse
-        $packages = Join-Path $stage '.python_packages\lib\site-packages'
-        New-Item -ItemType Directory -Path $packages | Out-Null
-        # Flex Consumption rejects Oryx app settings, so the Linux wheels are
-        # installed here. The function runtime is Python 3.11.
-        & python -m pip install --target $packages --requirement (Join-Path $source 'requirements.txt') --platform manylinux2014_x86_64 --python-version 3.11 --implementation cp --only-binary=:all: --upgrade --index-url 'https://packagefeedproxy.microsoft.io/pypi/simple/'
-        if ($LASTEXITCODE -ne 0) {
-            throw "pip install failed with exit code $LASTEXITCODE."
-        }
-        Get-ChildItem -Path $stage -Recurse -Directory -Filter '__pycache__' | Remove-Item -Recurse -Force
-        Compress-Archive -Path (Join-Path $stage '*') -DestinationPath $zip
-        Write-Host "Publishing Python workload to $FunctionAppName"
-        # Flex rejects these. A site update does not always remove them, and if
-        # they remain the package deploy is treated as a remote build and fails.
-        & az functionapp config appsettings delete --resource-group $ResourceGroupName --name $FunctionAppName --setting-names SCM_DO_BUILD_DURING_DEPLOYMENT ENABLE_ORYX_BUILD --output none
-        if ($LASTEXITCODE -ne 0) {
-            throw 'Could not remove the Flex-unsupported build app settings.'
-        }
-        $deadline = (Get-Date).AddMinutes(8)
-        do {
-            & az functionapp deployment source config-zip --resource-group $ResourceGroupName --name $FunctionAppName --src $zip --timeout 600
-            if ($LASTEXITCODE -eq 0) {
-                break
-            }
-            if ((Get-Date) -ge $deadline) {
-                throw "Azure CLI failed with exit code $LASTEXITCODE."
-            }
-            Write-Host 'Function zip deploy was rejected. Waiting 30 seconds before retrying.'
-            Start-Sleep -Seconds 30
-        } while ($true)
-    }
-    finally {
-        Remove-Item -LiteralPath $stage -Recurse -Force -ErrorAction SilentlyContinue
-        Remove-Item -LiteralPath $zip -Force -ErrorAction SilentlyContinue
-    }
-}
-
-function Get-BlockFunctionKey {
-    param(
-        [Parameter(Mandatory)]
-        [string] $ResourceGroupName,
-        [Parameter(Mandatory)]
-        [string] $FunctionAppName
-    )
-    $deadline = (Get-Date).AddMinutes(5)
-    do {
-        $key = az functionapp keys list --resource-group $ResourceGroupName --name $FunctionAppName --query 'functionKeys.default' --output tsv 2>$null
-        if ($LASTEXITCODE -eq 0 -and -not [string]::IsNullOrWhiteSpace($key)) {
-            return $key.Trim()
-        }
-        Start-Sleep -Seconds 15
-    } while ((Get-Date) -lt $deadline)
-    throw 'The Function App did not expose a default function key. The playbook stays fail-closed until this step succeeds.'
-}
-
-function Set-PlaybookFunctionBinding {
-    param(
-        [Parameter(Mandatory)]
-        [string] $ResourceGroupName,
-        [Parameter(Mandatory)]
-        [string] $Location,
-        [Parameter(Mandatory)]
-        [string] $PlaybookName,
-        [Parameter(Mandatory)]
-        [string] $FunctionUrl,
-        [Parameter(Mandatory)]
-        [string] $FunctionKey,
-        [Parameter(Mandatory)]
-        [string] $WorkspaceResourceId,
-        [Parameter(Mandatory)]
-        [string] $ApproverEmail,
-        [Parameter(Mandatory)]
-        [string] $TemplateFile
-    )
-    $parameterFile = Join-Path ([System.IO.Path]::GetTempPath()) ("ase-sentinel-poc-bind-{0}.json" -f [guid]::NewGuid().ToString('n'))
-    $payload = [ordered]@{
-        '$schema' = 'https://schema.management.azure.com/schemas/2019-04-01/deploymentParameters.json#'
-        contentVersion = '1.0.0.0'
-        parameters = [ordered]@{
-            location = @{ value = $Location }
-            playbookName = @{ value = $PlaybookName }
-            functionUrl = @{ value = $FunctionUrl }
-            functionKey = @{ value = $FunctionKey }
-            approverEmail = @{ value = $ApproverEmail }
-            logAnalyticsWorkspaceId = @{ value = $WorkspaceResourceId }
-            tags = @{
-                value = @{
-                    Customer = 'ASE'
-                    Purpose = 'SentinelWafBlockPoc'
-                    Environment = 'poc'
-                    ManagedBy = 'bicep'
-                }
-            }
-        }
-    }
-    $payload | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $parameterFile -Encoding utf8NoBOM
-    try {
-        Write-Host "az deployment group create --name ase-sentinel-poc-function-binding --resource-group $ResourceGroupName --template-file $TemplateFile --parameters <function key omitted>"
-        & az deployment group create --name 'ase-sentinel-poc-function-binding' --resource-group $ResourceGroupName --template-file $TemplateFile --parameters "@$parameterFile" --output none
-        if ($LASTEXITCODE -ne 0) {
-            throw 'Azure CLI failed while binding the playbook to the function.'
-        }
-    }
-    finally {
-        Remove-Item -LiteralPath $parameterFile -Force -ErrorAction SilentlyContinue
-    }
-}
-
 function Remove-PlaybookNetworkContributor {
     param(
         [Parameter(Mandatory)]
@@ -278,7 +167,7 @@ function Remove-PlaybookNetworkContributor {
         [Parameter(Mandatory)]
         [string] $PrincipalId
     )
-    Write-Host 'Removing Network Contributor from the playbook identity on the WAF policy. The function identity keeps that role.'
+    Write-Host 'Removing Network Contributor from the playbook identity on the WAF policy.'
     $raw = az role assignment list --scope $PolicyId --assignee-object-id $PrincipalId --role '4d97b98b-1d4f-4787-a291-c67834d212e7' --query '[].id' --output tsv
     if ($LASTEXITCODE -ne 0) {
         throw 'Could not list playbook role assignments on the WAF policy.'
@@ -289,156 +178,6 @@ function Remove-PlaybookNetworkContributor {
         if ($LASTEXITCODE -ne 0) {
             throw 'Could not remove Network Contributor from the playbook identity.'
         }
-    }
-}
-
-function Repair-JsonFlagAppSettings {
-    param(
-        [Parameter(Mandatory)]
-        [string] $ResourceGroupName,
-        [Parameter(Mandatory)]
-        [string] $FunctionAppName,
-        [Parameter(Mandatory)]
-        [bool] $AutoBlockEnabled,
-        [Parameter(Mandatory)]
-        [bool] $OverrideProtectedRanges
-    )
-    $expectedAuto = if ($AutoBlockEnabled) { 'true' } else { 'false' }
-    $expectedOverride = if ($OverrideProtectedRanges) { 'true' } else { 'false' }
-    $subscriptionId = az account show --query id --output tsv
-    if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($subscriptionId)) {
-        throw 'Could not read the current subscription id.'
-    }
-    $subscriptionId = $subscriptionId.Trim()
-    $root = Join-Path ([System.IO.Path]::GetTempPath()) ("ase-sentinel-poc-settings-{0}" -f [guid]::NewGuid().ToString('n'))
-    New-Item -ItemType Directory -Path $root | Out-Null
-    $pyPath = Join-Path $root 'repair.py'
-    $listPath = Join-Path $root 'list.json'
-    $bodyPath = Join-Path $root 'body.json'
-    $statusPath = Join-Path $root 'status.json'
-    $errPath = Join-Path $root 'az-error.txt'
-    @'
-import json
-import sys
-
-list_path, body_path, status_path, expected_auto, expected_override = sys.argv[1:6]
-with open(list_path, encoding="utf-8-sig") as handle:
-    items = json.load(handle)
-if not isinstance(items, list):
-    raise SystemExit(2)
-props = {}
-for item in items:
-    if not isinstance(item, dict):
-        raise SystemExit("app setting entry is not an object")
-    name = item.get("name")
-    value = item.get("value")
-    if not isinstance(name, str) or name == "":
-        raise SystemExit("app setting name is missing")
-    if value is None:
-        value = ""
-    if not isinstance(value, str):
-        raise SystemExit(name + " value is not a string")
-    props[name] = value
-required = (
-    "AzureWebJobsStorage__accountName",
-    "AzureWebJobsStorage__credential",
-    "WAF_POLICY_RESOURCE_ID",
-    "WAF_PROVIDER",
-    "AUTO_BLOCK_ENABLED",
-    "OVERRIDE_PROTECTED_RANGES",
-    "BLOCK_RULE_NAME",
-    "APPLICATIONINSIGHTS_CONNECTION_STRING",
-    "APPLICATIONINSIGHTS_AUTHENTICATION_STRING",
-)
-missing = [name for name in required if props.get(name, "") == ""]
-if missing:
-    if len(props) < 8:
-        raise SystemExit(2)
-    raise SystemExit("missing app settings: " + ", ".join(missing))
-if props["APPLICATIONINSIGHTS_AUTHENTICATION_STRING"] != "Authorization=AAD":
-    raise SystemExit("APPLICATIONINSIGHTS_AUTHENTICATION_STRING is not Authorization=AAD")
-changed = False
-if props["AUTO_BLOCK_ENABLED"] != expected_auto:
-    props["AUTO_BLOCK_ENABLED"] = expected_auto
-    changed = True
-if props["OVERRIDE_PROTECTED_RANGES"] != expected_override:
-    props["OVERRIDE_PROTECTED_RANGES"] = expected_override
-    changed = True
-with open(body_path, "w", encoding="utf-8", newline="\n") as handle:
-    json.dump({"properties": props}, handle, ensure_ascii=True)
-    handle.write("\n")
-with open(status_path, "w", encoding="utf-8", newline="\n") as handle:
-    json.dump(
-        {
-            "changed": changed,
-            "count": len(props),
-            "auto": props["AUTO_BLOCK_ENABLED"],
-            "override": props["OVERRIDE_PROTECTED_RANGES"],
-        },
-        handle,
-    )
-    handle.write("\n")
-'@ | Set-Content -LiteralPath $pyPath -Encoding utf8NoBOM
-    try {
-        $status = $null
-        $deadline = (Get-Date).AddMinutes(3)
-        do {
-            & az functionapp config appsettings list --resource-group $ResourceGroupName --name $FunctionAppName --output json |
-                Set-Content -LiteralPath $listPath -Encoding utf8NoBOM
-            if ($LASTEXITCODE -ne 0) {
-                throw 'Could not list Function App settings.'
-            }
-            & python $pyPath $listPath $bodyPath $statusPath $expectedAuto $expectedOverride
-            if ($LASTEXITCODE -eq 0) {
-                $status = Get-Content -LiteralPath $statusPath -Raw | ConvertFrom-Json
-                break
-            }
-            if ($LASTEXITCODE -ne 2 -or (Get-Date) -ge $deadline) {
-                throw 'Function App settings are missing Application Insights or the JSON block flags. The values were not printed.'
-            }
-            Write-Host 'Function App settings are not ready. Waiting 15 seconds before reading them again.'
-            Start-Sleep -Seconds 15
-        } while ($true)
-        Write-Host "App settings: count=$($status.count) AUTO_BLOCK_ENABLED=$($status.auto) OVERRIDE_PROTECTED_RANGES=$($status.override) ApplicationInsights=connected"
-        if (-not $status.changed) {
-            return $false
-        }
-        $uri = "https://management.azure.com/subscriptions/$subscriptionId/resourceGroups/$ResourceGroupName/providers/Microsoft.Web/sites/$FunctionAppName/config/appsettings?api-version=2024-04-01"
-        Write-Host 'Rewriting AUTO_BLOCK_ENABLED and OVERRIDE_PROTECTED_RANGES as the JSON tokens true or false.'
-        $verified = $null
-        $readBackDeadline = (Get-Date).AddMinutes(2)
-        & az rest --method put --uri $uri --body "@$bodyPath" --output none 2>$errPath
-        if ($LASTEXITCODE -ne 0) {
-            throw "Updating Function App settings failed with exit code $LASTEXITCODE. The response was not printed."
-        }
-        do {
-            & az functionapp config appsettings list --resource-group $ResourceGroupName --name $FunctionAppName --output json |
-                Set-Content -LiteralPath $listPath -Encoding utf8NoBOM
-            if ($LASTEXITCODE -ne 0) {
-                throw 'Could not read Function App settings after the update.'
-            }
-            & python $pyPath $listPath $bodyPath $statusPath $expectedAuto $expectedOverride
-            if ($LASTEXITCODE -eq 0) {
-                $verified = Get-Content -LiteralPath $statusPath -Raw | ConvertFrom-Json
-                if (-not $verified.changed) {
-                    break
-                }
-            }
-            elseif ($LASTEXITCODE -ne 2) {
-                throw 'Function App settings did not read back after the update.'
-            }
-            if ((Get-Date) -ge $readBackDeadline) {
-                $autoText = if ($verified) { $verified.auto } else { 'unread' }
-                $overrideText = if ($verified) { $verified.override } else { 'unread' }
-                throw "AUTO_BLOCK_ENABLED read back as '$autoText' and OVERRIDE_PROTECTED_RANGES read back as '$overrideText'. Expected $expectedAuto and $expectedOverride."
-            }
-            Start-Sleep -Seconds 10
-        } while ($true)
-        Write-Host "App settings verified: AUTO_BLOCK_ENABLED=$($verified.auto) OVERRIDE_PROTECTED_RANGES=$($verified.override)"
-        return $true
-    }
-    finally {
-        Remove-Item -LiteralPath $root -Recurse -Force -ErrorAction SilentlyContinue
     }
 }
 
@@ -454,20 +193,6 @@ if ($SubscriptionId) {
     Invoke-AzCli @('account', 'set', '--subscription', $SubscriptionId)
 }
 Invoke-AzCli @('account', 'show', '--output', 'none')
-
-# Bicep owns the app settings list, so a main deployment resets every setting
-# that is not in the template. Capture the Teams notifier URL first so it can
-# be restored after the deployment when -NotifyTeamsUrl is not passed.
-$preservedNotifyUrl = ''
-if (-not $WhatIf) {
-    $prevFn = az deployment group show --name 'ase-sentinel-poc-main' --resource-group $ResourceGroupName --query 'properties.outputs.functionAppName.value' --output tsv 2>$null
-    if ($LASTEXITCODE -eq 0 -and -not [string]::IsNullOrWhiteSpace($prevFn)) {
-        $captured = az functionapp config appsettings list --resource-group $ResourceGroupName --name $prevFn --query "[?name=='NOTIFY_TEAMS_URL'].value" --output tsv 2>$null
-        if ($LASTEXITCODE -eq 0 -and -not [string]::IsNullOrWhiteSpace($captured)) {
-            $preservedNotifyUrl = $captured.Trim()
-        }
-    }
-}
 
 if (-not $AutomationRuleOnly) {
     if ($DeployTestWaf) {
@@ -497,7 +222,6 @@ if (-not $AutomationRuleOnly) {
         "autoBlockEnabled=$($AutoBlockEnabled.ToString().ToLowerInvariant())",
         "overrideProtectedRanges=$($OverrideProtectedRanges.ToString().ToLowerInvariant())",
         "protectedIpRanges=$rangesJson",
-        "maximumBlockEntries=$MaximumBlockEntries",
         "detectionThreshold=$DetectionThreshold",
         "queryFrequencyMinutes=$QueryFrequencyMinutes",
         "queryLookbackMinutes=$QueryLookbackMinutes",
@@ -505,8 +229,7 @@ if (-not $AutomationRuleOnly) {
         "probeRuleName=$ProbeRuleName",
         "probeRulePriority=$ProbeRulePriority",
         "blockRuleName=$BlockRuleName",
-        "blockRulePriority=$BlockRulePriority",
-        "notifyEvents=$NotifyEvents",
+        "blockApiUrl=$BlockApiUrl",
         "approverEmail=$ApproverEmail",
         "appGatewayMinCapacity=$AppGatewayMinCapacity",
         "appGatewayMaxCapacity=$AppGatewayMaxCapacity"
@@ -528,49 +251,6 @@ if (-not $AutomationRuleOnly) {
         throw 'Could not read outputs from deployment ase-sentinel-poc-main.'
     }
     $mainOutputs = $mainOutputsRaw | ConvertFrom-Json
-    if ([string]::IsNullOrWhiteSpace($mainOutputs.functionAppName.value) -or [string]::IsNullOrWhiteSpace($mainOutputs.functionUrl.value)) {
-        throw 'The main deployment did not return the Function App name and URL.'
-    }
-    Publish-BlockFunction -ResourceGroupName $ResourceGroupName -FunctionAppName $mainOutputs.functionAppName.value -RepoRoot $repoRoot
-    $rewritten = Repair-JsonFlagAppSettings `
-        -ResourceGroupName $ResourceGroupName `
-        -FunctionAppName $mainOutputs.functionAppName.value `
-        -AutoBlockEnabled $AutoBlockEnabled `
-        -OverrideProtectedRanges $OverrideProtectedRanges
-    if ($rewritten) {
-        Write-Host 'Restarting the Function App so the worker loads the corrected JSON settings.'
-        Invoke-AzCli @('functionapp', 'restart', '--resource-group', $ResourceGroupName, '--name', $mainOutputs.functionAppName.value)
-    }
-    $notifyUrl = $NotifyTeamsUrl
-    if (-not $notifyUrl) {
-        $notifyUrl = $preservedNotifyUrl
-    }
-    if ($notifyUrl) {
-        # The Workflows URL is not a template parameter, so it stays out of the
-        # deployment history. Direct call, not Invoke-AzCli, which echoes the
-        # command line. The new direct/cu triggers require an Entra token, so
-        # NOTIFY_TEAMS_AUTH=entra makes the notifier send the managed identity
-        # token for https://service.flow.microsoft.com/.
-        Write-Host 'Storing the Teams Workflows URL as an app setting. The value is not printed.'
-        & az functionapp config appsettings set `
-            --resource-group $ResourceGroupName `
-            --name $mainOutputs.functionAppName.value `
-            --settings "NOTIFY_TEAMS_URL=$notifyUrl" "NOTIFY_TEAMS_AUTH=entra" `
-            --output none
-        if ($LASTEXITCODE -ne 0) {
-            throw 'Could not set the Teams notifier app settings. Notifications stay silent until they are set.'
-        }
-    }
-    $functionKey = Get-BlockFunctionKey -ResourceGroupName $ResourceGroupName -FunctionAppName $mainOutputs.functionAppName.value
-    Set-PlaybookFunctionBinding `
-        -ResourceGroupName $ResourceGroupName `
-        -Location $Location `
-        -PlaybookName $mainOutputs.playbookName.value `
-        -FunctionUrl $mainOutputs.functionUrl.value `
-        -FunctionKey $functionKey `
-        -WorkspaceResourceId $mainOutputs.workspaceResourceId.value `
-        -ApproverEmail $ApproverEmail `
-        -TemplateFile (Join-Path $infra 'modules\playbook.bicep')
     Remove-PlaybookNetworkContributor -PolicyId $mainOutputs.wafPolicyId.value -PrincipalId $mainOutputs.playbookPrincipalId.value
 }
 
@@ -633,13 +313,13 @@ Write-Host "WAF provider:        $($shown.wafProvider.value)"
 Write-Host "WAF policy:          $($shown.wafPolicyName.value)"
 Write-Host "WAF policy id:       $($shown.wafPolicyId.value)"
 Write-Host "Playbook:            $($shown.playbookName.value)"
-if ($shown.PSObject.Properties.Name -contains 'functionAppName' -and $shown.functionAppName.value) {
-    Write-Host "Function:            $($shown.functionAppName.value)"
+if ($shown.blockApiUrl.value) {
+    Write-Host "Block API URL:       $($shown.blockApiUrl.value)"
 }
-if ($shown.PSObject.Properties.Name -contains 'appInsightsName' -and $shown.appInsightsName.value) {
-    Write-Host "Application Insights: $($shown.appInsightsName.value)"
+else {
+    Write-Host 'Block API URL:       empty. The playbook parameter functionUrl stays empty until -BlockApiUrl is passed.'
 }
-Write-Host "autoBlockEnabled:    $($shown.autoBlockEnabled.value)"
+Write-Host "autoBlockEnabled:    $($shown.autoBlockEnabled.value) (deployment output only; the web app setting is unchanged)"
 Write-Host "Detection query:     $($shown.detectionQueryKind.value)"
 Write-Host "Analytics rule id:   $($shown.analyticsRuleId.value)"
 Write-Host "Probe marker:        $($shown.probeMarker.value)"
@@ -651,13 +331,8 @@ else {
     Write-Host 'This deployment did not create a test Application Gateway. An empty public IP output does not delete a gateway that is already in the resource group.'
 }
 Write-Host ''
-if ($shown.autoBlockEnabled.value -eq $true) {
-    Write-Host 'Blocking is enabled. A matching incident can change the WAF policy.'
-    Write-Host 'To return to dry-run, redeploy with -AutoBlockEnabled $false and the same resource group and name prefix.'
-}
-else {
-    Write-Host 'Dry-run is active. A matching incident records "Would block IP: <address>" and does not change the WAF policy.'
-}
+Write-Host 'The operations web app decides the block. AUTO_BLOCK_ENABLED on that app is not set by this script.'
+Write-Host 'A playbook call with execution=enforce writes for that call. execution=dry-run does not.'
 Write-Host 'Cleanup: ./scripts/cleanup.ps1 -ResourceGroupName' $ResourceGroupName
 Write-Host 'Incident latency is usually 10 to 15 minutes: ingestion plus the analytics schedule.'
 Write-Host 'The procedure is in docs/testing.md.'

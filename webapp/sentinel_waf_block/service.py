@@ -1,6 +1,6 @@
 """HTTP-agnostic entry point used by the operations app and its block API.
 
-The playbook posts the same JSON the Function App used to accept. The page
+The playbook posts incident JSON to this entry point. The page
 handlers call this directly. Neither path imports a web framework.
 """
 

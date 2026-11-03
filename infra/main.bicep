@@ -41,10 +41,10 @@ param frontDoorLogDestination string = 'AzureDiagnostics'
 ])
 param wafMode string = 'Prevention'
 
-@description('Default true. The function PUTs the block rule when AUTO_BLOCK_ENABLED is the JSON boolean true. False records Would block IP and does not change the WAF policy. Pass false to deploy.ps1 to keep dry-run.')
+@description('Recorded on the deployment output only. The operations web app reads its own AUTO_BLOCK_ENABLED app setting. This template does not set that app setting.')
 param autoBlockEnabled bool = true
 
-@description('Skips built-in and customer protected-range filters in the KQL and the playbook. Invalid addresses are still rejected. Default false.')
+@description('Skips built-in and customer protected-range filters in the KQL and the operations web app. Invalid addresses are still rejected. Default false.')
 param overrideProtectedRanges bool = false
 
 @description('Extra IPv4 addresses that must not be blocked. A single canonical address or /8, /16, /24, /32. Built-in private, loopback, link-local, metadata, and CGNAT ranges stay protected unless overrideProtectedRanges is true.')
@@ -65,32 +65,22 @@ param queryFrequencyMinutes int = 5
 @maxValue(1440)
 param queryLookbackMinutes int = 30
 
-@description('Maximum IPs stored on the block custom rule.')
-@minValue(1)
-@maxValue(500)
-param maximumBlockEntries int = 100
-
 @description('Query-string marker used by the test rig and the analytics rule.')
 param probeMarker string = 'ase-poc-probe'
 
 @description('Custom rule that matches the simulated probe. Deployed on the test WAF only.')
 param probeRuleName string = 'PocSimulatedProbe'
 
-@description('Probe rule priority. Must differ from blockRulePriority.')
+@description('Probe rule priority. 1 runs first. The operations web app uses block priority 10 unless its own setting says otherwise.')
 @minValue(1)
 @maxValue(100)
 param probeRulePriority int = 50
 
-@description('Custom rule name reserved for the playbook. The analytics rule ignores it.')
+@description('Custom rule name reserved for the block list. The analytics rule ignores it.')
 param blockRuleName string = 'SentinelAutoBlock'
 
-@description('Block rule priority. 1 runs first. Must differ from probeRulePriority.')
-@minValue(1)
-@maxValue(100)
-param blockRulePriority int = 10
-
-@description('Comma-separated Teams notification events. Default would_block,blocked,put_failed,capacity. The Teams Workflows URL itself is not a template parameter: deploy.ps1 stores it as an app setting after the deployment so it stays out of the deployment history.')
-param notifyEvents string = 'would_block,blocked,put_failed,capacity'
+@description('HTTPS URL of POST /api/SentinelWafAutoBlock on the operations web app. Empty keeps a new playbook from calling it. The workflow parameter name stays functionUrl.')
+param blockApiUrl string = ''
 
 @description('Approver who receives the Teams/email approval card. The playbook stops fail-closed when this is empty.')
 param approverEmail string = ''
@@ -135,7 +125,6 @@ var wafPolicyResourceId = deployApplicationGateway
       : (wafProvider == 'FrontDoor'
           ? resourceId('Microsoft.Network/frontDoorWebApplicationFirewallPolicies', existingWafPolicyName)
           : resourceId('Microsoft.Network/ApplicationGatewayWebApplicationFirewallPolicies', existingWafPolicyName)))
-var armApiVersion = wafProvider == 'FrontDoor' ? '2024-02-01' : '2024-05-01'
 var builtInProtectedRanges = [
   '0.0.0.0/8'
   '10.0.0.0/8'
@@ -183,35 +172,12 @@ module waf 'modules/waf.bicep' = {
   }
 }
 
-module blockFunction 'modules/function.bicep' = {
-  name: 'function'
-  dependsOn: [
-    waf
-  ]
-  params: {
-    location: location
-    namePrefix: namePrefix
-    wafPolicyResourceId: wafPolicyResourceId
-    wafProvider: wafProvider
-    protectedIpRanges: protectedIpRanges
-    maximumBlockEntries: maximumBlockEntries
-    autoBlockEnabled: autoBlockEnabled
-    overrideProtectedRanges: overrideProtectedRanges
-    blockRuleName: blockRuleName
-    blockRulePriority: blockRulePriority
-    notifyEvents: notifyEvents
-    armApiVersion: armApiVersion
-    logAnalyticsWorkspaceId: logAnalytics.outputs.workspaceResourceId
-    tags: tags
-  }
-}
-
 module playbook 'modules/playbook.bicep' = {
   name: 'playbook'
   params: {
     location: location
     playbookName: 'playbook-${namePrefix}-block-malicious-ip'
-    functionUrl: blockFunction.outputs.functionUrl
+    functionUrl: blockApiUrl
     functionKey: ''
     approverEmail: approverEmail
     logAnalyticsWorkspaceId: logAnalytics.outputs.workspaceResourceId
@@ -256,11 +222,7 @@ output publicIpAddress string = waf.outputs.publicIpAddress
 output playbookName string = playbook.outputs.playbookName
 output playbookResourceId string = playbook.outputs.playbookResourceId
 output playbookPrincipalId string = playbook.outputs.principalId
-output functionAppName string = blockFunction.outputs.functionAppName
-output functionPrincipalId string = blockFunction.outputs.functionPrincipalId
-output functionUrl string = blockFunction.outputs.functionUrl
-output appInsightsName string = blockFunction.outputs.appInsightsName
-output appInsightsResourceId string = blockFunction.outputs.appInsightsResourceId
+output blockApiUrl string = blockApiUrl
 output analyticsRuleId string = sentinel.outputs.analyticsRuleId
 output watchlistAlias string = sentinel.outputs.watchlistAlias
 output detectionQueryKind string = sentinel.outputs.detectionQueryKind

@@ -1,6 +1,6 @@
 # Block malicious IP playbook
 
-Deployed Logic App definition: `thin-workflow.json`. Bicep passes the function URL and function key from `infra/modules/playbook.bicep`. `workflow.json` is the previous expression implementation and is not deployed.
+Deployed Logic App definition: `thin-workflow.json`. Bicep passes workflow parameters `functionUrl` and `functionKey`. Those names stay. The URL is the operations web app and the key is `BLOCK_API_KEY`. `workflow.json` is the previous expression implementation and is not deployed.
 
 The playbook is started by the Sentinel incident trigger. It reads IP entities and POSTs them to the operations web app at `POST /api/SentinelWafAutoBlock`. It does not validate addresses and it does not PUT the WAF policy. The web app does that work. `AUTO_BLOCK_ENABLED` on the web app stays the JSON boolean `false` for this POC, so the first call is a dry-run unless the body sets `execution` to `enforce`.
 
