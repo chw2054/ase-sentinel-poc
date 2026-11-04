@@ -1,6 +1,6 @@
 # Deployment
 
-Use `scripts/deploy.ps1` for a new resource group. It creates the resource group, deploys `infra/main.bicep`, removes Network Contributor from the playbook identity, assigns the Sentinel automation role, and then deploys the automation rule. It does not create or publish a Function App, and it does not write the operations web app's settings. Do not run it against the live resource group: the main template redeploys the playbook with an empty `functionKey` and can reset the Office 365 connection. `infra/parameters/main.bicepparam` is the safe default set for review. A deployment that uses only that file does not create the automation rule, so Sentinel will not call the playbook.
+Use `scripts/deploy.ps1` for a new resource group. It creates the resource group, deploys `infra/main.bicep`, removes Network Contributor from the playbook identity when the mode is thin, grants that role when the mode is full, assigns the Sentinel automation role, and then deploys the automation rule. It does not create or publish a Function App, and it does not write the operations web app's settings. Do not run it against the live resource group: the main template redeploys the playbook with an empty `functionKey` and can reset the Office 365 connection. `infra/parameters/main.bicepparam` is the safe default set for review. A deployment that uses only that file does not create the automation rule, so Sentinel will not call the playbook.
 
 ## Default test rig
 
@@ -26,7 +26,8 @@ Outputs include the workspace name, workspace resource id, policy id, playbook n
 - `FrontDoor` requires `-DeployTestWaf $false` and either `-ExistingWafPolicyName` or `-ExistingWafPolicyResourceId`
 - The test rig rejects an existing policy name or id at the same time, so a deploy cannot silently ignore one
 - An existing resource id must be the ARM type for the selected provider
-- `-AutoBlockEnabled` defaults to `$true`. `$false` is recorded on the deployment output. The script does not write `AUTO_BLOCK_ENABLED` on the web app
+- `-PlaybookMode` is `thin` or `full`. The default is `thin`. `thin` posts to the web app. `full` deploys `workflow.json` and does not call the web app
+- `-AutoBlockEnabled` defaults to `$true`. For `thin`, `$false` is recorded on the deployment output and the script does not write `AUTO_BLOCK_ENABLED` on the web app. For `full`, the value is the workflow parameter: `$true` PUTs and requires `-ConfirmAutoBlock`; `$false` comments and does not PUT
 - `-OverrideProtectedRanges $true` requires `-ConfirmOverrideProtectedRanges`
 - Each `ProtectedIpRanges` entry is an IPv4 address or `/8`, `/16`, `/24`, `/32`. Any other form is rejected.
 - `NamePrefix` is 3 to 24 characters of lowercase letters, digits, and hyphens
@@ -101,9 +102,27 @@ If the second deployment fails on replication, wait and run `-AutomationRuleOnly
 
 The template no longer creates Application Insights or a storage account. Incremental Bicep will not delete `appi-ase-sentinel-poc` or `st7ttpll74bmhiq` if they are still in the resource group. Leave them until you confirm the web app does not use them.
 
+## Playbook mode
+
+`thin` is the default. The Logic App posts to the web app and waits for Office 365 approval. `scripts/deploy.ps1` removes Network Contributor from that playbook identity.
+
+`full` deploys the expression workflow. It does not call the web app. The script grants Network Contributor on the WAF policy to that identity. A later `thin` deploy removes it again. Incremental deployment does not delete the Office 365 connection left by a previous thin deploy.
+
+```powershell
+./scripts/deploy.ps1 -ResourceGroupName rg-ase-sentinel-poc -PlaybookMode full -AutoBlockEnabled $false
+```
+
+That comments and does not PUT. A full deploy that writes requires both flags:
+
+```powershell
+./scripts/deploy.ps1 -ResourceGroupName rg-ase-sentinel-poc -PlaybookMode full -AutoBlockEnabled $true -ConfirmAutoBlock
+```
+
+Both modes use the same capacity rule. One custom rule holds 600 match values. A full rule opens the next `SentinelAutoBlock` rule on the same policy. A new batch larger than 600, 100 custom rules, or no free priority from 1 to 100 is refused and nothing is written. The full playbook does not send a Teams card.
+
 ## Dry-run
 
-Keep `AUTO_BLOCK_ENABLED` as the JSON token `false` on the operations web app. The playbook sends `execution=awaiting-approval`, then `execution=approved` only after approval. `execution=approved` writes for that call. `execution=awaiting-approval` does not. `-AutoBlockEnabled $false` changes the deployment output only. Do not redeploy the live playbook to change that flag.
+This section is the thin path. Keep `AUTO_BLOCK_ENABLED` as the JSON token `false` on the operations web app. The playbook sends `execution=awaiting-approval`, then `execution=approved` only after approval. `execution=approved` writes for that call. `execution=awaiting-approval` does not. `-AutoBlockEnabled $false` changes the deployment output only. Do not redeploy the live playbook to change that flag.
 
 ## Destroy
 

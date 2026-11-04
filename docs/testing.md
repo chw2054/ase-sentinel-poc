@@ -1,12 +1,13 @@
 # Testing
 
-The test is a repeatable GET. It does not depend on malicious traffic. Default `autoBlockEnabled` is true, so a successful run PUTs the address onto `SentinelAutoBlock` and comments `Blocked IP: <address>`.
+The test is a repeatable GET. It does not depend on malicious traffic. The default playbook is `thin`: a write happens only after Office 365 approval, and the comment comes from the web app. `-PlaybookMode full -AutoBlockEnabled $true -ConfirmAutoBlock` is the path where the Logic App itself PUTs the address onto `SentinelAutoBlock` and comments `Blocked IP: <address>`.
 
 ## Before you start
 
 - Deploy with `scripts/deploy.ps1` and wait until the public IP is present.
 - Leave `wafMode` at `Prevention` if you want HTTP 403. Detection mode is not expected to enforce the custom block rule.
-- Leave `autoBlockEnabled` at its default `true` when the goal is to block the probe address. Pass `-AutoBlockEnabled $false` when the goal is a dry-run comment and an unchanged policy.
+- For the thin playbook, approve the Office 365 mail when the goal is to block the probe address. Reject, or leave `AUTO_BLOCK_ENABLED` false and do not approve, when the goal is an unchanged policy.
+- For the full playbook, `-AutoBlockEnabled $true -ConfirmAutoBlock` blocks the probe address. `-AutoBlockEnabled $false` leaves a dry-run comment and an unchanged policy.
 - The analytics threshold default is 3. Send at least that many requests.
 
 ## Steps

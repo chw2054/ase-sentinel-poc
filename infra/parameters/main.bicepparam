@@ -6,6 +6,7 @@ param deployTestWaf = true
 param frontDoorLogDestination = 'AzureDiagnostics'
 param wafMode = 'Prevention'
 param autoBlockEnabled = true
+param playbookMode = 'thin'
 param overrideProtectedRanges = false
 param protectedIpRanges = []
 param detectionThreshold = 3

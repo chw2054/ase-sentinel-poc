@@ -120,7 +120,7 @@ Microsoft Sentinel、Log Analytics、Application Gateway WAF_v2、Logic Apps、A
 
 - 目的：取 IP、送 `awaiting-approval`、等候核准、必要時送 `approved`。
 - 現況：Logic App Enabled，系統受控識別，URL 主機 `app-ase-sentinel-poc-7ttpll74.azurewebsites.net`，路徑 `/api/SentinelWafAutoBlock`，參數含 `functionKey`。
-- 定義來源：`infra/modules/playbook.bicep` 載入 `thin-workflow.json`。
+- 定義來源：預設 `infra/modules/playbook.bicep` 載入 `thin-workflow.json`。`playbookMode=full` 改載入 `workflow.json`。線上這座仍是 thin。
 - 常見問題：重新部署 playbook 模組會碰到 Office 365 連接器。授權遺失時，核准步驟失敗，政策不應變更。失敗後要讀 run 與事件註解，不要只看 Logic App 最終狀態。失敗分支使用 `Terminate` 且 `runStatus` 為 Succeeded，所以 run 顯示成功不代表已封鎖。
 
 ### 4.5 封鎖 API
@@ -244,7 +244,7 @@ GET 或 PUT 若回 `authentication failed`，先確認 CLI 或受控識別的租
 
 ### 7.7 容量
 
-數 `SentinelAutoBlock` 與 `SentinelAutoBlock-*` 的 match value。單條達到 600 才會再開規則，且整份政策自訂規則不可超過 100，其中還包含 `PocSimulatedProbe`。線上主政策目前是 2 條自訂規則，封鎖規則 6 個值。產品設定 100 沒有在這條 PUT 路徑生效。
+數 `SentinelAutoBlock` 與 `SentinelAutoBlock-*` 的 match value。單條達到 600 才會再開規則，且整份政策自訂規則不可超過 100，其中還包含 `PocSimulatedProbe`。thin 與 full 都用這條規則。沒有 100 筆的產品開關。線上主政策目前是 2 條自訂規則，封鎖規則 6 個值。
 
 ### 7.8 稽核
 
@@ -320,7 +320,7 @@ PUT 必須包含原有的 `location`、`tags`、`policySettings`、`customRules`
 | 祕密不在原始碼 | URL 與金鑰在 App Settings。沒有 Key Vault |
 | 最小權限已核對 | 未做。Function 角色設定檔已過時 |
 | 可重複部署 | 未達成。腳本與線上路徑不一致 |
-| 產品上限 100 已在寫入路徑生效 | 未達成 |
+| 單規則 600，滿了開下一條規則 | 已實作於 web app 與 `workflow.json`。沒有 100 筆產品開關 |
 | 監控與警示 | 未見針對這條流程的警示 |
 | 第二工廠參數表 | 待客戶填寫 |
 | 瀏覽器作業頁面已驗收 | 未在本次驗證 |

@@ -266,7 +266,7 @@ sequenceDiagram
 - 空的 `approverEmail`：寫註解後以 Succeeded 結束，不呼叫引擎。
 - 相關檔案：`playbooks/block-malicious-ip/thin-workflow.json`、`playbooks/block-malicious-ip/README.md`、`infra/modules/playbook.bicep`。
 
-`workflow.json` 是舊的運算式實作，部署不載入。`webapp-workflow.json` 有測試 `webapp/tests/test_playbook.py`，不是 Bicep 載入的定義。
+`workflow.json` 是運算式實作。`playbookMode=full` 時 `infra/modules/playbook-full.bicep` 才載入它。預設 `thin` 不載入。這份文件觀察到的線上 Logic App 仍是 thin 定義，尚未換成 `workflow.json`。`webapp-workflow.json` 有測試 `webapp/tests/test_playbook.py`，不是 Bicep 載入的定義。
 
 ### 4.5 封鎖引擎
 
@@ -494,7 +494,7 @@ Playbook 本身不應擁有 WAF 寫入權。`deploy.ps1` 有 `Remove-PlaybookNet
 ### 8.2 未實作或僅為建議
 
 - 沒有跨執行的樂觀鎖定或 ETag 檢查。建議在正式環境比對 PUT 前的政策版本。
-- 沒有另外的 100 筆產品上限。若 ASE 要加一個比 600 更小的上限，必須改引擎。App Setting 已經沒有這個開關。
+- 沒有另外的 100 筆產品上限。thin 與 full 都是每條規則 600，滿了開下一條。若 ASE 要加一個更小的上限，必須改 web app 與 `workflow.json`。App Setting 與 workflow 參數都沒有這個開關。
 - 沒有封鎖到期、自動解除、或變更單編號。
 - 沒有針對 playbook 失敗或容量拒絕的 Azure Monitor 警示規則。本次資源清單沒有這類警示，只有 Application Insights Smart Detection 動作群組。
 - 第二份政策沒有被引擎納入寫入集合。若將來要多政策同步，現況還沒有這條行為。
@@ -529,7 +529,7 @@ Playbook 本身不應擁有 WAF 寫入權。`deploy.ps1` 有 `Remove-PlaybookNet
 - 把部署腳本改成部署現在這條 Web App 路徑，或凍結一份可重建的基礎結構。在那之前不要執行 `scripts/deploy.ps1`。
 - 確認 Web App 受控識別只有目標政策的寫入權與 Sentinel 註解所需的 Responder，沒有訂用帳戶層級的寬角色。
 - 確認 `/api/SentinelWafAutoBlock` 不能匿名呼叫，且 `BLOCK_API_KEY` 只放在 App Settings 或改到 Key Vault。
-- 決定 100 與 600 哪一個才是 ASE 要的上限，並讓引擎真的執行該上限。
+- 單規則上限已定為 600。thin 與 full 都用這個數字，滿了就開下一條 `SentinelAutoBlock-<n>`。沒有 100 筆的產品開關。
 - 為 playbook 失敗、PUT 失敗與容量拒絕建立警示。
 - 第二座工廠改用該工廠自己的核准人、watchlist 與現有 WAF 政策，不要部署這組測試閘道，除非該工廠接受測試後端與模擬標記。
 

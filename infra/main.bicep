@@ -41,8 +41,20 @@ param frontDoorLogDestination string = 'AzureDiagnostics'
 ])
 param wafMode string = 'Prevention'
 
-@description('Recorded on the deployment output only. The operations web app reads its own AUTO_BLOCK_ENABLED app setting. This template does not set that app setting.')
+@description('For playbookMode full, true makes that Logic App PUT the block rule with no approval email. false comments and does not PUT. For playbookMode thin, this value is a deployment output only. The operations web app reads its own AUTO_BLOCK_ENABLED app setting. This template does not set that app setting.')
 param autoBlockEnabled bool = true
+
+@description('thin posts the incident to the operations web app and waits for approval. full runs the expression workflow in the Logic App and does not call the web app. The default is thin.')
+@allowed([
+  'thin'
+  'full'
+])
+param playbookMode string = 'thin'
+
+@description('Priority of the first SentinelAutoBlock rule written by playbookMode full. A later rule uses the next free priority. The thin playbook does not use this. The web app has its own BLOCK_RULE_PRIORITY.')
+@minValue(1)
+@maxValue(100)
+param blockRulePriority int = 10
 
 @description('Skips built-in and customer protected-range filters in the KQL and the operations web app. Invalid addresses are still rejected. Default false.')
 param overrideProtectedRanges bool = false
@@ -172,14 +184,33 @@ module waf 'modules/waf.bicep' = {
   }
 }
 
-module playbook 'modules/playbook.bicep' = {
+var playbookResourceName = 'playbook-${namePrefix}-block-malicious-ip'
+
+module playbookThin 'modules/playbook.bicep' = if (playbookMode == 'thin') {
   name: 'playbook'
   params: {
     location: location
-    playbookName: 'playbook-${namePrefix}-block-malicious-ip'
+    playbookName: playbookResourceName
     functionUrl: blockApiUrl
     functionKey: ''
     approverEmail: approverEmail
+    logAnalyticsWorkspaceId: logAnalytics.outputs.workspaceResourceId
+    tags: tags
+  }
+}
+
+module playbookFull 'modules/playbook-full.bicep' = if (playbookMode == 'full') {
+  name: 'playbook-full'
+  params: {
+    location: location
+    playbookName: playbookResourceName
+    wafPolicyResourceId: wafPolicyResourceId
+    wafProvider: wafProvider
+    protectedIpRanges: protectedIpRanges
+    autoBlockEnabled: autoBlockEnabled
+    overrideProtectedRanges: overrideProtectedRanges
+    blockRuleName: blockRuleName
+    blockRulePriority: blockRulePriority
     logAnalyticsWorkspaceId: logAnalytics.outputs.workspaceResourceId
     tags: tags
   }
@@ -219,9 +250,10 @@ output wafPolicyName string = wafPolicyName
 output wafPolicyId string = wafPolicyResourceId
 output appGatewayName string = waf.outputs.appGatewayName
 output publicIpAddress string = waf.outputs.publicIpAddress
-output playbookName string = playbook.outputs.playbookName
-output playbookResourceId string = playbook.outputs.playbookResourceId
-output playbookPrincipalId string = playbook.outputs.principalId
+output playbookName string = playbookThin.?outputs.playbookName ?? playbookFull.?outputs.playbookName!
+output playbookResourceId string = playbookThin.?outputs.playbookResourceId ?? playbookFull.?outputs.playbookResourceId!
+output playbookPrincipalId string = playbookThin.?outputs.principalId ?? playbookFull.?outputs.principalId!
+output playbookMode string = playbookMode
 output blockApiUrl string = blockApiUrl
 output analyticsRuleId string = sentinel.outputs.analyticsRuleId
 output watchlistAlias string = sentinel.outputs.watchlistAlias

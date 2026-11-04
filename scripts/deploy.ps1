@@ -1,11 +1,14 @@
 # Deploys the ASE WAF -> Sentinel -> block proof of concept.
-# The live block API is the operations web app. This script does not create or
-# publish a Function App, and it does not write the web app's app settings.
+# -PlaybookMode thin is the default. That Logic App posts to the operations web
+# app. -PlaybookMode full deploys the expression workflow, which does not call
+# the web app. This script does not create or publish a Function App, and it
+# does not write the web app's app settings.
 # Do not run this script against the live resource group: the main template
 # redeploys the playbook with an empty functionKey and can reset the Office 365
 # connection. An empty -BlockApiUrl also clears the playbook parameter functionUrl.
-# -AutoBlockEnabled is recorded on the deployment output only. It does not change
-# the web app setting AUTO_BLOCK_ENABLED.
+# For thin mode, -AutoBlockEnabled is recorded on the deployment output only. It
+# does not change the web app setting AUTO_BLOCK_ENABLED. For full mode, that
+# flag is the workflow parameter that decides whether the Logic App PUTs.
 # Requires Azure CLI, a subscription, and rights to create the resource group,
 # role assignments, and Microsoft Sentinel. This script does not register resource providers.
 #requires -Version 7.0
@@ -25,9 +28,13 @@ param(
     [string] $NotifyTeamsUrl = '',
     [ValidatePattern('^[a-z_,]*$')]
     [string] $NotifyEvents = 'blocked,put_failed,capacity',
-    # The playbook stops fail-closed when this is empty: no approver, no block.
+    # The thin playbook stops fail-closed when this is empty: no approver, no block.
+    # The full playbook does not send this approval email.
     [ValidatePattern('^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$')]
     [string] $ApproverEmail = '',
+    # thin calls the operations web app. full runs the expression workflow.
+    [ValidateSet('thin', 'full')]
+    [string] $PlaybookMode = 'thin',
     # HTTPS URL of POST /api/SentinelWafAutoBlock. Empty leaves the playbook
     # parameter functionUrl empty. The workflow parameter name stays functionUrl.
     [string] $BlockApiUrl = '',
@@ -36,6 +43,9 @@ param(
     [ValidateSet('Prevention', 'Detection')]
     [string] $WafMode = 'Prevention',
     [bool] $AutoBlockEnabled = $true,
+    # Required only for -PlaybookMode full -AutoBlockEnabled $true. That
+    # combination PUTs from the Logic App with no approval email.
+    [switch] $ConfirmAutoBlock,
     [bool] $OverrideProtectedRanges = $false,
     [switch] $ConfirmOverrideProtectedRanges,
     [string[]] $ProtectedIpRanges = @(),
@@ -105,7 +115,24 @@ if ($WafMode -eq 'Detection') {
 if (-not [string]::IsNullOrWhiteSpace($BlockApiUrl) -and $BlockApiUrl -notmatch '^https://') {
     throw 'BlockApiUrl must be empty or an https URL of POST /api/SentinelWafAutoBlock.'
 }
-if ($AutoBlockEnabled) {
+if ($PlaybookMode -eq 'full' -and $AutoBlockEnabled -and -not $ConfirmAutoBlock) {
+    throw 'A full playbook with -AutoBlockEnabled $true writes the WAF policy from the Logic App and does not send an approval email. Re-run with -ConfirmAutoBlock only when that write is intended. Pass -AutoBlockEnabled $false for a full playbook that comments and does not PUT.'
+}
+if ($PlaybookMode -eq 'thin' -and $ConfirmAutoBlock) {
+    Write-Warning '-ConfirmAutoBlock has no effect on the thin playbook. That playbook writes only after Office 365 approval, through the web app.'
+}
+if ($PlaybookMode -eq 'full' -and -not [string]::IsNullOrWhiteSpace($BlockApiUrl)) {
+    Write-Warning '-BlockApiUrl is ignored when -PlaybookMode is full. The expression playbook does not call the web app.'
+}
+if ($PlaybookMode -eq 'full') {
+    if ($AutoBlockEnabled) {
+        Write-Warning 'Playbook mode is full and autoBlockEnabled is true. The Logic App PUTs the WAF policy with no approval email. This script does not change the web app setting AUTO_BLOCK_ENABLED.'
+    }
+    else {
+        Write-Warning 'Playbook mode is full and autoBlockEnabled is false. The Logic App comments and does not PUT. This script does not change the web app setting AUTO_BLOCK_ENABLED.'
+    }
+}
+elseif ($AutoBlockEnabled) {
     Write-Warning 'autoBlockEnabled is recorded as true on the deployment output. This script does not change the operations web app setting AUTO_BLOCK_ENABLED.'
 }
 else {
@@ -150,6 +177,30 @@ function Invoke-AzCli {
     & az @Arguments
     if ($LASTEXITCODE -ne 0) {
         throw "Azure CLI failed with exit code $LASTEXITCODE."
+    }
+}
+
+function Grant-PlaybookNetworkContributor {
+    param(
+        [Parameter(Mandatory)]
+        [string] $PolicyId,
+        [Parameter(Mandatory)]
+        [string] $PrincipalId
+    )
+    $roleId = '4d97b98b-1d4f-4787-a291-c67834d212e7'
+    $raw = az role assignment list --scope $PolicyId --assignee-object-id $PrincipalId --role $roleId --query '[].id' --output tsv
+    if ($LASTEXITCODE -ne 0) {
+        throw 'Could not list playbook role assignments on the WAF policy.'
+    }
+    $ids = @($raw -split "\r?\n" | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+    if ($ids.Count -gt 0) {
+        Write-Host 'The playbook identity already has Network Contributor on the WAF policy.'
+        return
+    }
+    Write-Host 'Granting Network Contributor to the playbook identity on the WAF policy.'
+    & az role assignment create --scope $PolicyId --assignee-object-id $PrincipalId --assignee-principal-type ServicePrincipal --role $roleId --output none
+    if ($LASTEXITCODE -ne 0) {
+        throw 'Could not grant Network Contributor to the playbook identity.'
     }
 }
 
@@ -222,6 +273,8 @@ if (-not $AutomationRuleOnly) {
         "probeRuleName=$ProbeRuleName",
         "probeRulePriority=$ProbeRulePriority",
         "blockRuleName=$BlockRuleName",
+        "blockRulePriority=$BlockRulePriority",
+        "playbookMode=$PlaybookMode",
         "blockApiUrl=$BlockApiUrl",
         "approverEmail=$ApproverEmail",
         "appGatewayMinCapacity=$AppGatewayMinCapacity",
@@ -244,7 +297,12 @@ if (-not $AutomationRuleOnly) {
         throw 'Could not read outputs from deployment ase-sentinel-poc-main.'
     }
     $mainOutputs = $mainOutputsRaw | ConvertFrom-Json
-    Remove-PlaybookNetworkContributor -PolicyId $mainOutputs.wafPolicyId.value -PrincipalId $mainOutputs.playbookPrincipalId.value
+    if ($PlaybookMode -eq 'full') {
+        Grant-PlaybookNetworkContributor -PolicyId $mainOutputs.wafPolicyId.value -PrincipalId $mainOutputs.playbookPrincipalId.value
+    }
+    else {
+        Remove-PlaybookNetworkContributor -PolicyId $mainOutputs.wafPolicyId.value -PrincipalId $mainOutputs.playbookPrincipalId.value
+    }
 }
 
 function Get-SentinelAutomationPrincipalId {
@@ -305,7 +363,9 @@ Write-Host "Workspace id:        $($shown.workspaceResourceId.value)"
 Write-Host "WAF provider:        $($shown.wafProvider.value)"
 Write-Host "WAF policy:          $($shown.wafPolicyName.value)"
 Write-Host "WAF policy id:       $($shown.wafPolicyId.value)"
+$shownMode = if ($shown.PSObject.Properties.Name -contains 'playbookMode') { $shown.playbookMode.value } else { $PlaybookMode }
 Write-Host "Playbook:            $($shown.playbookName.value)"
+Write-Host "Playbook mode:       $shownMode"
 if ($shown.blockApiUrl.value) {
     Write-Host "Block API URL:       $($shown.blockApiUrl.value)"
 }
@@ -324,8 +384,15 @@ else {
     Write-Host 'This deployment did not create a test Application Gateway. An empty public IP output does not delete a gateway that is already in the resource group.'
 }
 Write-Host ''
-Write-Host 'The operations web app decides the block. AUTO_BLOCK_ENABLED on that app is not set by this script.'
-Write-Host 'A playbook call with execution=approved writes for that call. execution=awaiting-approval does not.'
+if ($shownMode -eq 'full') {
+    Write-Host 'The full playbook decides the block. It does not call the operations web app.'
+    Write-Host 'autoBlockEnabled true PUTs the one custom rule. false comments and does not PUT.'
+    Write-Host 'Each custom rule holds 600 match values. A full rule opens the next SentinelAutoBlock rule on the same policy. The full playbook does not send a Teams card.'
+}
+else {
+    Write-Host 'The operations web app decides the block. AUTO_BLOCK_ENABLED on that app is not set by this script.'
+    Write-Host 'A playbook call with execution=approved writes for that call. execution=awaiting-approval does not.'
+}
 Write-Host 'Cleanup: ./scripts/cleanup.ps1 -ResourceGroupName' $ResourceGroupName
 Write-Host 'Incident latency is usually 10 to 15 minutes: ingestion plus the analytics schedule.'
 Write-Host 'The procedure is in docs/testing.md.'

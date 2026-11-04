@@ -58,13 +58,17 @@ Tokens in the KQL files are replaced by Bicep `replace()` for the threshold, win
 
 ## Playbook
 
-The deployed playbook is a Consumption Logic App, system-assigned managed identity, definition in `playbooks/block-malicious-ip/thin-workflow.json`. `workflow.json` in the same folder is the previous expression implementation. Deploy does not load it.
+The playbook is a Consumption Logic App with a system-assigned managed identity. `playbookMode` chooses the definition. The default `thin` loads `playbooks/block-malicious-ip/thin-workflow.json`. `full` loads `workflow.json` from the same folder and does not call the web app.
 
 The Sentinel connection uses `parameterValueType: Alternative` and `ManagedServiceIdentity`. Bicep warns BCP187 on `kind` and BCP037 on `parameterValueType`. Those properties are required for this connection and are kept.
 
-Trigger path: `/incident-creation`. The Logic App calls `Entities - Get IPs`, selects each `Address`, and POSTs once to the operations web app at `/api/SentinelWafAutoBlock`. The HTTP action does not retry and times out at two minutes. A successful response already includes the incident comment, so the Logic App does not write a second one. If the entity call or the block API call fails, the Logic App comments and does not claim the address was blocked.
+Trigger path: `/incident-creation`.
 
-The web app package `sentinel_waf_block` owns validation, the WAF read, the awaiting-approval response, and the PUT. `autoBlockEnabled` is the web app setting `AUTO_BLOCK_ENABLED`. Only the JSON boolean `true` sends a PUT when `execution` is omitted. A request with `execution` set to `approved` or `awaiting-approval` overrides that setting for that call. A missing setting returns `awaiting-approval` and does not write. `dry-run` and `enforce` are rejected. The playbook sends `x-functions-key`, which must match `BLOCK_API_KEY`. Easy Auth excludes that one path.
+In `thin` mode the Logic App calls `Entities - Get IPs`, selects each `Address`, and POSTs once to the operations web app at `/api/SentinelWafAutoBlock`. The HTTP action does not retry and times out at two minutes. A successful response already includes the incident comment, so the Logic App does not write a second one. If the entity call or the block API call fails, the Logic App comments and does not claim the address was blocked. After Office 365 approval it POSTs again with `execution=approved`.
+
+In `full` mode the same trigger starts `workflow.json`. That definition validates addresses, GETs the WAF policy, and PUTs when `autoBlockEnabled` is true. It does not send the approval email or a Teams card. `false` comments `Would block IP` and does not PUT. Capacity matches the web app: 600 match values on one custom rule, then the next `SentinelAutoBlock-<n>` rule. A new batch larger than 600, 100 custom rules, or no free priority from 1 to 100 is refused and does not PUT.
+
+On the thin path, the web app package `sentinel_waf_block` owns validation, the WAF read, the awaiting-approval response, and the PUT. `autoBlockEnabled` is the web app setting `AUTO_BLOCK_ENABLED`. Only the JSON boolean `true` sends a PUT when `execution` is omitted. A request with `execution` set to `approved` or `awaiting-approval` overrides that setting for that call. A missing setting returns `awaiting-approval` and does not write. `dry-run` and `enforce` are rejected. The playbook sends `x-functions-key`, which must match `BLOCK_API_KEY`. Easy Auth excludes that one path.
 
 The operations web app serves that API on Python 3.11. `infra/main.bicep` does not create a Function App, a storage account, or an Application Insights component. `scripts/deploy.ps1` does not publish one. Do not run that script against the live resource group. The main template deploys the playbook with an empty `functionKey`, and that redeploy can reset the Office 365 connection. Pass `-BlockApiUrl` only when a new playbook should call the web app. An empty value clears `functionUrl`.
 
@@ -74,9 +78,10 @@ Incremental Bicep does not delete a resource that the template no longer mention
 
 | Principal | Role | Scope |
 | --- | --- | --- |
-| Playbook managed identity | Microsoft Sentinel Responder `3e150937-b8fe-4cfb-8069-0eaf05ecd056` | POC resource group, so it can read IP entities and comment when the block API call does not finish |
+| Playbook managed identity | Microsoft Sentinel Responder `3e150937-b8fe-4cfb-8069-0eaf05ecd056` | POC resource group, so it can read IP entities and comment. The thin playbook uses this when the block API call does not finish. The full playbook uses it for every decision comment |
 | Operations web app managed identity | Microsoft Sentinel Responder `3e150937-b8fe-4cfb-8069-0eaf05ecd056` | POC resource group, so it can comment on the incident after a decision. The live assignment is not created by `infra/main.bicep` |
-| Operations web app managed identity | Network Contributor `4d97b98b-1d4f-4787-a291-c67834d212e7` | The one WAF policy resource. The live assignment stays. This template does not grant it |
+| Operations web app managed identity | Network Contributor `4d97b98b-1d4f-4787-a291-c67834d212e7` | The one WAF policy resource. The live assignment stays. This template does not grant it. The thin playbook must not have this role |
+| Full playbook managed identity | Network Contributor `4d97b98b-1d4f-4787-a291-c67834d212e7` | The one WAF policy, granted by `scripts/deploy.ps1 -PlaybookMode full` and removed by a later thin deploy. The template does not grant it |
 | Azure Security Insights service principal | Microsoft Sentinel Automation Contributor `f4c81013-99ee-4d62-a7ee-b3f1f648599a` | POC resource group, so the automation rule can start the playbook |
 
 No user OAuth token is stored in source. The playbook secure parameter `functionKey` holds the web app setting `BLOCK_API_KEY`. The workflow parameter name stays `functionKey`. The deploy script does not print that value and does not set it. The automation-rule role assignment name is `guid(resourceGroup, principalId, roleId)`. The automation rule name is `guid('ase-waf-block-playbook', workspace.id)`.

@@ -9,6 +9,7 @@ ROOT = Path(__file__).resolve().parents[3]
 THIN = ROOT / "playbooks" / "block-malicious-ip" / "thin-workflow.json"
 REFERENCE = ROOT / "playbooks" / "block-malicious-ip" / "workflow.json"
 PLAYBOOK = ROOT / "infra" / "modules" / "playbook.bicep"
+FULL = ROOT / "infra" / "modules" / "playbook-full.bicep"
 MAIN = ROOT / "infra" / "main.bicep"
 
 
@@ -90,6 +91,7 @@ def test_bicep_keeps_the_logic_app_thin_and_does_not_deploy_a_function() -> None
     playbook = PLAYBOOK.read_text(encoding="utf-8")
     main = MAIN.read_text(encoding="utf-8")
     assert "thin-workflow.json" in playbook
+    assert "workflow.json" not in playbook.replace("thin-workflow.json", "")
     assert "role-waf-policy.bicep" not in playbook
     assert "office365" in playbook
     assert "approverEmail" in playbook
@@ -104,6 +106,31 @@ def test_bicep_keeps_the_logic_app_thin_and_does_not_deploy_a_function() -> None
     assert "functionKey: ''" in main
     assert "param blockApiUrl string = ''" in main
     assert "param autoBlockEnabled bool = true" in main
+    assert "param playbookMode string = 'thin'" in main
+    assert "if (playbookMode == 'thin')" in main
+    assert "if (playbookMode == 'full')" in main
     assert "3e150937-b8fe-4cfb-8069-0eaf05ecd056" in playbook
     assert not (ROOT / "infra" / "modules" / "function.bicep").exists()
     assert not (ROOT / "infra" / "modules" / "role-waf-policy.bicep").exists()
+
+
+def test_full_playbook_is_selectable_and_does_not_call_the_web_app() -> None:
+    full = FULL.read_text(encoding="utf-8")
+    main = MAIN.read_text(encoding="utf-8")
+    assert "workflow.json" in full
+    assert "thin-workflow.json" not in full
+    assert "functionUrl" not in full
+    assert "functionKey" not in full
+    assert "office365" not in full
+    assert "autoBlockEnabled" in full
+    assert "maximumBlockEntries" not in full
+    workflow = REFERENCE.read_text(encoding="utf-8")
+    assert "maximumBlockEntries" not in workflow
+    assert "Each rule holds at most 600 addresses" in workflow
+    assert "targetRuleName" in workflow
+    assert "4d97b98b-1d4f-4787-a291-c67834d212e7" not in full
+    assert "modules/playbook-full.bicep" in main
+    assert "modules/playbook.bicep" in main
+    workflow = REFERENCE.read_text(encoding="utf-8")
+    assert "functionUrl" not in workflow
+    assert "https://management.azure.com" in workflow

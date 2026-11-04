@@ -84,7 +84,7 @@ Front Door path (not deployed):
 | `infra/main.bicep` | Resource group contents: workspace, Sentinel, test WAF, playbook, playbook RBAC. It does not create the operations web app |
 | `sentinel/analytics-rules/` | KQL per WAF product and log schema |
 | `sentinel/automation-rules/` | Second deployment. Sentinel rejects `RunPlaybook` until Azure Security Insights can run playbooks |
-| `playbooks/block-malicious-ip/` | Thin Logic App. `workflow.json` is the expression reference and is not deployed |
+| `playbooks/block-malicious-ip/` | Two Logic App definitions. `thin` is the default and calls the web app. `full` deploys `workflow.json` and does not call the web app |
 | `webapp/` | Operations app and `POST /api/SentinelWafAutoBlock` |
 | `scripts/deploy.ps1` | Supported deploy path, including the automation-rule phase |
 | `scripts/test.ps1` | Sends the probe marker |
@@ -285,10 +285,10 @@ That deletes the workspace, Sentinel, the playbook, the test gateway, and a WAF 
 - Front Door log rows use `Block` and `Log`, not `Blocked`. The Front Door queries in this repo follow that. They are not deployed against a Front Door diagnostic setting this repo creates.
 - `AzureFrontDoorWebApplicationFirewallLog` is optional and unconfirmed. The default Front Door query uses `AzureDiagnostics` and `Category == "FrontDoorWebApplicationFirewallLog"`, which is the schema Microsoft documents.
 - The web app's customer-range matcher is an IPv4 host or `/8`, `/16`, `/24`, and `/32` only. Any other incident value is rejected and is not written. An incident with no IPv4 address does not GET the policy. A mixed incident still PUTs the IPv4 addresses. An address already stored on the named rule is copied back as an exact string.
-- The deployed playbook is the thin Logic App, which POSTs to the operations web app. The workflow parameter names stay `functionUrl` and `functionKey`. `workflow.json` is not deployed. A later deploy that must keep existing WAF custom rules uses `-DeployTestWaf $false -ExistingWafPolicyName <policy>`. That deploy leaves the gateway frontend on IPv4. Do not run `scripts/deploy.ps1` against the live resource group. It redeploys the playbook with an empty `functionKey` and can reset the Office 365 connection.
+- The default playbook is the thin Logic App, which POSTs to the operations web app. The workflow parameter names stay `functionUrl` and `functionKey`. `-PlaybookMode full` deploys `workflow.json` instead. That definition writes from the Logic App when `autoBlockEnabled` is true, uses the same 600-entry rule cap as the web app, and does not use the approval email. A later deploy that must keep existing WAF custom rules uses `-DeployTestWaf $false -ExistingWafPolicyName <policy>`. That deploy leaves the gateway frontend on IPv4. Do not run `scripts/deploy.ps1` against the live resource group. It redeploys the playbook with an empty `functionKey` and can reset the Office 365 connection.
 - Network Contributor on the policy is wider than "edit one custom rule". A custom role was not invented here.
 - The PUT does not use `If-Match`. A concurrent policy edit can be overwritten. The PUT is not retried.
-- No automatic unblock, no expiry, and no analyst approval gate inside Sentinel. Pass `-AutoBlockEnabled $false` to stop WAF writes.
+- No automatic unblock, no expiry, and no analyst approval gate inside Sentinel. The thin playbook writes only after Office 365 approval. On the full playbook, pass `-AutoBlockEnabled $false` to stop WAF writes.
 - After a real block, that IP can stop producing probe logs.
 - The 30 second wait for the automation-rule role can be too short.
 - The Azure Security Insights lookup depends on the display name `Azure Security Insights`. The deploy script filters that exact name. A prefix match also returns Content As Code and Management.

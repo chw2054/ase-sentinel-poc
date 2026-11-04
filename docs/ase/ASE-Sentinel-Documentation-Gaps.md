@@ -54,7 +54,7 @@
 | G-24 | P1 | 端到端 | 本次沒有發送探測、沒有 Reject、沒有 Approve、沒有重跑 pytest。資源存在不能當成測試通過 | 在維護視窗做一筆 Reject，比對 match value 數量不變。Approve 只在客戶同意使用測試 IP 時進行，並事先寫好移除步驟 | 部署指南第 6 章 |
 | G-25 | P2 | 單元測試 | `webapp/tests/engine/` 與 `webapp/tests/test_live.py`、`test_playbook.py` 覆蓋位址、執行旗標、playbook 條件與 live 路由。結果沒有在這次文件工作中產生 | 交接前記下指令與通過數量。未跑之前，文件不引用通過次數 | `webapp/tests/` |
 | G-26 | P2 | 延伸規則與分析規則 | KQL 只排除名稱完全等於 `SentinelAutoBlock` 的列。`SentinelAutoBlock-2` 的阻擋可能再被計入。線上尚無延伸規則，所以這不是已觀察到的事件 | 用測試政策驗證，或把排除條件改成規則名稱起始於基底名稱。這是程式變更，不在本次文件範圍執行 | `simulated-probe.application-gateway.kql`；`waf_arm.py` 的 `_is_block_list_name` |
-| G-27 | P2 | 單規則容量 | 未使用的 `MAXIMUM_BLOCK_ENTRIES` 已從程式、部署參數與 App Settings 移除。`select_block_list` 以 600 個 match value 為一條規則的上限，滿了就在同一政策開下一條規則。新的一批超過 600、自訂規則已達 100，或 priority 1–100 已滿時回 `capacity-exceeded` 且不 PUT | 若要更小的產品上限，必須另外加檢查。現在沒有 100 的開關 | `waf_arm.py` |
+| G-27 | P2 | 單規則容量 | 未使用的 `MAXIMUM_BLOCK_ENTRIES` 已從程式、部署參數、App Settings 與 full playbook 移除。web app 與 `workflow.json` 都以 600 個 match value 為一條規則的上限，滿了就在同一政策開下一條規則。新的一批超過 600、自訂規則已達 100，或 priority 1–100 已滿時不 PUT | 若要更小的產品上限，必須另外加檢查。現在沒有 100 的開關 | `waf_arm.py`；`playbooks/block-malicious-ip/workflow.json` |
 | G-28 | P3 | 並行 PUT | 沒有 ETag 或鎖。兩個 run 可能覆蓋 | 用兩個重疊的 dry-run 無法測出，必須在測試訂用帳戶做可控的並行 enforce | `engine.py` 的 `_decide` |
 
 ## 6. POC 到正式環境的落差
