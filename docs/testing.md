@@ -54,7 +54,7 @@ The test is a repeatable GET. It does not depend on malicious traffic. Default `
 - Incident number and title
 - The line `Would block IP: <address>`
 - Provider, policy resource id, and the rule that would be updated
-- The list size that would result, and `maximumBlockEntries`
+- The list size that would result, and the rule that would receive the address
 - Rejected addresses and the reason
 - The Logic App run name
 

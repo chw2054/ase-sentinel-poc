@@ -13,12 +13,9 @@ from dataclasses import dataclass
 class Settings:
     app_env: str = "local"
     secret: str = "local-dev-secret-change-me"
-    public_base_url: str = "http://127.0.0.1:8000"
     dev_login_password: str = "local-dev"
     block_rule_name: str = "SentinelAutoBlock"
     block_rule_priority: int = 10
-    require_approval: bool = True
-    approver_email: str = "admin@mngenvmcap591832.onmicrosoft.com"
     poc_admins: str = ""
     subscription_id: str = ""
     resource_group: str = ""
@@ -34,15 +31,9 @@ class Settings:
         return cls(
             app_env=app_env,
             secret=os.environ.get("APP_SECRET", "local-dev-secret-change-me" if local else ""),
-            public_base_url=os.environ.get("PUBLIC_BASE_URL", "http://127.0.0.1:8000"),
             dev_login_password=os.environ.get("DEV_LOGIN_PASSWORD", "local-dev" if local else ""),
             block_rule_name=os.environ.get("BLOCK_RULE_NAME", "SentinelAutoBlock"),
             block_rule_priority=int(os.environ.get("BLOCK_RULE_PRIORITY", "10")),
-            require_approval=os.environ.get("REQUIRE_APPROVAL", "true").lower() != "false",
-            approver_email=os.environ.get(
-                "APPROVER_EMAIL",
-                "admin@mngenvmcap591832.onmicrosoft.com",
-            ),
             poc_admins=os.environ.get("POC_ADMIN_USERS", ""),
             subscription_id=os.environ.get("AZURE_SUBSCRIPTION_ID", ""),
             resource_group=os.environ.get("AZURE_RESOURCE_GROUP", ""),

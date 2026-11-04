@@ -41,6 +41,7 @@ def test_env_bool_and_array_are_json_values() -> None:
             "MAXIMUM_BLOCK_ENTRIES": "100",
         }
     )
+    assert not hasattr(loaded, "maximum_block_entries")
     assert loaded.auto_block_enabled is True
     assert loaded.protected_ip_ranges == ("203.0.113.0/24",)
     assert loaded.arm_api_version == "2024-02-01"
@@ -55,8 +56,12 @@ def test_env_bool_and_array_are_json_values() -> None:
 
 
 def test_bool_is_not_accepted_as_an_integer() -> None:
+    ignored = config_from_mapping(
+        {"wafPolicyResourceId": POLICY, "wafProvider": "ApplicationGateway", "maximumBlockEntries": True}
+    )
+    assert ignored.block_rule_priority == 10
     with pytest.raises(ConfigError):
-        config_from_mapping({"wafPolicyResourceId": POLICY, "wafProvider": "ApplicationGateway", "maximumBlockEntries": True})
+        config_from_mapping({"wafPolicyResourceId": POLICY, "wafProvider": "ApplicationGateway", "blockRulePriority": True})
 
 
 def test_incident_payload_rejects_non_strings() -> None:

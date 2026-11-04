@@ -31,7 +31,6 @@ def config(**overrides: object) -> Config:
         "waf_policy_resource_id": POLICY,
         "waf_provider": APPLICATION_GATEWAY,
         "protected_ip_ranges": (),
-        "maximum_block_entries": 100,
         "auto_block_enabled": False,
         "override_protected_ranges": False,
         "block_rule_name": "SentinelAutoBlock",

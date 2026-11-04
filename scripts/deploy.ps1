@@ -36,16 +36,9 @@ param(
     [ValidateSet('Prevention', 'Detection')]
     [string] $WafMode = 'Prevention',
     [bool] $AutoBlockEnabled = $true,
-    # Accepted so an older command that still passes -ConfirmAutoBlock keeps working.
-    # Blocking is the default and does not require this switch.
-    [switch] $ConfirmAutoBlock,
     [bool] $OverrideProtectedRanges = $false,
     [switch] $ConfirmOverrideProtectedRanges,
     [string[]] $ProtectedIpRanges = @(),
-    # Accepted so older commands still parse. The template no longer creates a
-    # Function App, and this script does not write this value onto the web app.
-    [ValidateRange(1, 500)]
-    [int] $MaximumBlockEntries = 100,
     [ValidateRange(1, 100)]
     [int] $DetectionThreshold = 3,
     [ValidateRange(5, 60)]

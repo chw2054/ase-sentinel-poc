@@ -51,7 +51,6 @@ class Config:
     waf_policy_resource_id: str
     waf_provider: str
     protected_ip_ranges: tuple[str, ...] = ()
-    maximum_block_entries: int = 100
     auto_block_enabled: object = False
     override_protected_ranges: object = False
     block_rule_name: str = "SentinelAutoBlock"

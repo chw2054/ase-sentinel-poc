@@ -249,8 +249,6 @@ class Engine:
         return replace(base, status=done, changed=True, reason="")
 
     def _decide(self, incident: Incident, config: Config) -> Result:
-        if type(config.maximum_block_entries) is not int or config.maximum_block_entries < 1:
-            return _result(STATUS_VALIDATION, reason="maximumBlockEntries must be a positive integer")
         if type(config.block_rule_priority) is not int:
             return _result(STATUS_VALIDATION, reason="blockRulePriority must be an integer")
         if not isinstance(config.block_rule_name, str) or config.block_rule_name == "":

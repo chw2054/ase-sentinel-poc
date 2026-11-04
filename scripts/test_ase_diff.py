@@ -386,7 +386,6 @@ def _matching() -> dict:
         {"name": "WAF_PROVIDER", "value": "ApplicationGateway"},
         {"name": "BLOCK_RULE_NAME", "value": "SentinelAutoBlock"},
         {"name": "BLOCK_RULE_PRIORITY", "value": "10"},
-        {"name": "MAXIMUM_BLOCK_ENTRIES", "value": "100"},
         {"name": "PROTECTED_IP_RANGES", "value": "[]"},
         {"name": "NOTIFY_EVENTS", "value": "would_block,blocked,put_failed,capacity"},
         {"name": "APPLICATIONINSIGHTS_AUTHENTICATION_STRING", "value": "Authorization=AAD"},

@@ -13,10 +13,7 @@ param location string = resourceGroup().location
 @secure()
 param appSecret string
 
-param publicBaseUrl string
-param approverEmail string
 param pocAdminUsers string = ''
-param maximumBlockEntries int = 100
 
 resource plan 'Microsoft.Web/serverfarms@2023-12-01' = {
   name: '${appName}-plan'
@@ -51,11 +48,7 @@ resource app 'Microsoft.Web/sites@2023-12-01' = {
       appSettings: [
         { name: 'APP_ENV', value: 'production' }
         { name: 'APP_SECRET', value: appSecret }
-        { name: 'PUBLIC_BASE_URL', value: publicBaseUrl }
-        { name: 'APPROVER_EMAIL', value: approverEmail }
         { name: 'POC_ADMIN_USERS', value: pocAdminUsers }
-        { name: 'MAXIMUM_BLOCK_ENTRIES', value: string(maximumBlockEntries) }
-        { name: 'REQUIRE_APPROVAL', value: 'true' }
         { name: 'SCM_DO_BUILD_DURING_DEPLOYMENT', value: 'true' }
         { name: 'WEBSITES_PORT', value: '8000' }
         { name: 'WEBSITE_VNET_ROUTE_ALL', value: '1' }

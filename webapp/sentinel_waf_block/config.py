@@ -30,10 +30,7 @@ def config_from_mapping(data: Mapping[str, Any]) -> Config:
     ranges = data.get("protectedIpRanges", [])
     if isinstance(ranges, str) or not isinstance(ranges, list):
         raise ConfigError("protectedIpRanges must be an array")
-    maximum = data.get("maximumBlockEntries", 100)
     priority = data.get("blockRulePriority", 10)
-    if type(maximum) is not int or isinstance(maximum, bool):
-        raise ConfigError("maximumBlockEntries must be an integer")
     if type(priority) is not int or isinstance(priority, bool):
         raise ConfigError("blockRulePriority must be an integer")
     rule_name = data.get("blockRuleName", "SentinelAutoBlock")
@@ -48,7 +45,6 @@ def config_from_mapping(data: Mapping[str, Any]) -> Config:
         waf_policy_resource_id=resource_id,
         waf_provider=provider,
         protected_ip_ranges=tuple(ranges),
-        maximum_block_entries=maximum,
         auto_block_enabled=data.get("autoBlockEnabled", False),
         override_protected_ranges=data.get("overrideProtectedRanges", False),
         block_rule_name=rule_name,
@@ -78,8 +74,6 @@ def config_from_env(env: Mapping[str, str] | None = None) -> Config:
     }
     if "PROTECTED_IP_RANGES" in source:
         data["protectedIpRanges"] = _json_value("PROTECTED_IP_RANGES", source["PROTECTED_IP_RANGES"])
-    if "MAXIMUM_BLOCK_ENTRIES" in source:
-        data["maximumBlockEntries"] = _json_value("MAXIMUM_BLOCK_ENTRIES", source["MAXIMUM_BLOCK_ENTRIES"])
     if "AUTO_BLOCK_ENABLED" in source:
         data["autoBlockEnabled"] = _json_value("AUTO_BLOCK_ENABLED", source["AUTO_BLOCK_ENABLED"])
     if "OVERRIDE_PROTECTED_RANGES" in source:
