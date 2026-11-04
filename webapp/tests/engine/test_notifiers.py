@@ -88,7 +88,7 @@ def test_rejected_addresses_and_reason_are_escaped() -> None:
     notifier = TeamsWorkflowNotifier(URL, session=session)
     result = Result(
         status=STATUS_CAPACITY,
-        reason="merged list 2 <b> exceeds maximumBlockEntries",
+        reason="no block list can take 2 <b> addresses",
     )
     notifier.notify(EVENT_CAPACITY, result)
     encoded = str(session.posts[0]["json"])

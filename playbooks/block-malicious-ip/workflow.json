@@ -18,10 +18,6 @@
       "defaultValue": [],
       "type": "Array"
     },
-    "maximumBlockEntries": {
-      "defaultValue": 100,
-      "type": "Int"
-    },
     "autoBlockEnabled": {
       "defaultValue": false,
       "type": "Bool"
@@ -799,7 +795,7 @@
       "type": "Query",
       "inputs": {
         "from": "@variables('existingCustomRules')",
-        "where": "@equals(item()?['name'], parameters('blockRuleName'))"
+        "where": "@or(equals(item()?['name'], parameters('blockRuleName')), startsWith(item()?['name'], concat(parameters('blockRuleName'), '-')))"
       },
       "runAfter": {
         "Initialize_existingCustomRules": [
@@ -811,7 +807,7 @@
       "type": "Query",
       "inputs": {
         "from": "@variables('existingCustomRules')",
-        "where": "@not(equals(item()?['name'], parameters('blockRuleName')))"
+        "where": "@not(or(equals(item()?['name'], parameters('blockRuleName')), startsWith(item()?['name'], concat(parameters('blockRuleName'), '-'))))"
       },
       "runAfter": {
         "Initialize_existingCustomRules": [
@@ -821,9 +817,9 @@
     },
     "Compose_existing_match_values": {
       "type": "Compose",
-      "inputs": "@if(equals(length(body('Filter_block_rule')), 0), json('[]'), if(equals(parameters('wafProvider'), 'FrontDoor'), coalesce(first(body('Filter_block_rule'))?['matchConditions']?[0]?['matchValue'], json('[]')), coalesce(first(body('Filter_block_rule'))?['matchConditions']?[0]?['matchValues'], json('[]'))))",
+      "inputs": "@variables('listedAddresses')",
       "runAfter": {
-        "Filter_block_rule": [
+        "For_each_block_list": [
           "Succeeded"
         ]
       }
@@ -869,7 +865,7 @@
           "inputs": {
             "body": {
               "incidentArmId": "@triggerBody()?['object']?['id']",
-              "message": "<p><strong>ASE POC playbook made no change.</strong> @{join(outputs('Compose_distinct_candidates'), ', ')} is already on custom rule @{parameters('blockRuleName')}. The WAF policy was not written again.</p><p>Rejected:<br>@{if(empty(variables('rejected')), 'none', join(variables('rejected'), '<br>'))}</p><p>Logic App run: @{workflow()['run']['name']}</p>"
+              "message": "<p><strong>ASE POC playbook made no change.</strong> @{join(outputs('Compose_distinct_candidates'), ', ')} is already on custom rule @{coalesce(first(body('Filter_holder_rule'))?['name'], parameters('blockRuleName'))}. The WAF policy was not written again.</p><p>Rejected:<br>@{if(empty(variables('rejected')), 'none', join(variables('rejected'), '<br>'))}</p><p>Logic App run: @{workflow()['run']['name']}</p>"
             },
             "host": {
               "connection": {
@@ -902,52 +898,8 @@
         ],
         "Compose_merged_addresses": [
           "Succeeded"
-        ]
-      }
-    },
-    "Check_block_list_capacity": {
-      "type": "If",
-      "expression": {
-        "greater": [
-          "@length(outputs('Compose_merged_addresses'))",
-          "@int(parameters('maximumBlockEntries'))"
-        ]
-      },
-      "actions": {
-        "Add_comment_-_list_full": {
-          "type": "ApiConnection",
-          "inputs": {
-            "body": {
-              "incidentArmId": "@triggerBody()?['object']?['id']",
-              "message": "<p><strong>ASE POC playbook did not update the WAF policy.</strong> Adding @{join(body('Filter_new_addresses'), ', ')} would exceed maximumBlockEntries (@{parameters('maximumBlockEntries')}). Current list size: @{length(outputs('Compose_existing_match_values'))}. Remove stale addresses from @{parameters('blockRuleName')} before retrying.</p><p>Logic App run: @{workflow()['run']['name']}</p>"
-            },
-            "host": {
-              "connection": {
-                "name": "@parameters('$connections')['azuresentinel']['connectionId']"
-              }
-            },
-            "method": "post",
-            "path": "/Incidents/Comment"
-          },
-          "runAfter": {}
-        },
-        "Terminate_-_list_full": {
-          "type": "Terminate",
-          "inputs": {
-            "runStatus": "Succeeded"
-          },
-          "runAfter": {
-            "Add_comment_-_list_full": [
-              "Succeeded"
-            ]
-          }
-        }
-      },
-      "else": {
-        "actions": {}
-      },
-      "runAfter": {
-        "Check_already_blocked": [
+        ],
+        "Filter_holder_rule": [
           "Succeeded"
         ]
       }
@@ -973,9 +925,9 @@
             "Compose_rule_front_door": {
               "type": "Compose",
               "inputs": {
-                "name": "@parameters('blockRuleName')",
+                "name": "@variables('targetRuleName')",
                 "enabledState": "Enabled",
-                "priority": "@int(parameters('blockRulePriority'))",
+                "priority": "@variables('targetRulePriority')",
                 "ruleType": "MatchRule",
                 "action": "Block",
                 "matchConditions": [
@@ -983,7 +935,7 @@
                     "matchVariable": "RemoteAddr",
                     "operator": "IPMatch",
                     "negateCondition": false,
-                    "matchValue": "@outputs('Compose_merged_addresses')"
+                    "matchValue": "@variables('targetRuleValues')"
                   }
                 ]
               },
@@ -991,9 +943,9 @@
             },
             "Compose_all_rules_front_door": {
               "type": "Compose",
-              "inputs": "@union(createArray(outputs('Compose_rule_front_door')), body('Filter_other_rules'))",
+              "inputs": "@if(variables('targetRuleIsNew'), union(body('Select_rules_front_door'), createArray(outputs('Compose_rule_front_door'))), body('Select_rules_front_door'))",
               "runAfter": {
-                "Compose_rule_front_door": [
+                "Select_rules_front_door": [
                   "Succeeded"
                 ]
               }
@@ -1040,7 +992,7 @@
               "inputs": {
                 "body": {
                   "incidentArmId": "@triggerBody()?['object']?['id']",
-                  "message": "<p><strong>ASE POC playbook updated the Front Door WAF policy.</strong> Incident @{coalesce(triggerBody()?['object']?['properties']?['incidentNumber'], '')} (@{coalesce(triggerBody()?['object']?['properties']?['title'], '')}).</p><p>@{join(body('Select_blocked_lines_front_door'), '<br>')}</p><p>Custom rule @{parameters('blockRuleName')}, matchVariable RemoteAddr, operator IPMatch, action Block, priority @{parameters('blockRulePriority')}. List size @{length(outputs('Compose_merged_addresses'))} of @{parameters('maximumBlockEntries')}. Other custom rules, including the simulated probe rule, were kept.</p><p>Rejected:<br>@{if(empty(variables('rejected')), 'none', join(variables('rejected'), '<br>'))}</p><p>Policy: @{parameters('wafPolicyResourceId')}</p><p>There is no automatic expiry. Rollback is an operator action. Logic App run: @{workflow()['run']['name']}</p>"
+                  "message": "<p><strong>ASE POC playbook updated the Front Door WAF policy.</strong> Incident @{coalesce(triggerBody()?['object']?['properties']?['incidentNumber'], '')} (@{coalesce(triggerBody()?['object']?['properties']?['title'], '')}).</p><p>@{join(body('Select_blocked_lines_front_door'), '<br>')}</p><p>Custom rule @{variables('targetRuleName')}, matchVariable RemoteAddr, operator IPMatch, action Block, priority @{variables('targetRulePriority')}. List size @{length(variables('targetRuleValues'))} of 600. Other custom rules, including the simulated probe rule, were kept.</p><p>Rejected:<br>@{if(empty(variables('rejected')), 'none', join(variables('rejected'), '<br>'))}</p><p>Policy: @{parameters('wafPolicyResourceId')}</p><p>There is no automatic expiry. Rollback is an operator action. Logic App run: @{workflow()['run']['name']}</p>"
                 },
                 "host": {
                   "connection": {
@@ -1089,6 +1041,18 @@
                   "TimedOut"
                 ]
               }
+            },
+            "Select_rules_front_door": {
+              "type": "Select",
+              "inputs": {
+                "from": "@variables('existingCustomRules')",
+                "select": "@if(equals(item()?['name'], variables('targetRuleName')), outputs('Compose_rule_front_door'), item())"
+              },
+              "runAfter": {
+                "Compose_rule_front_door": [
+                  "Succeeded"
+                ]
+              }
             }
           },
           "else": {
@@ -1105,8 +1069,8 @@
                   "Compose_rule_application_gateway": {
                     "type": "Compose",
                     "inputs": {
-                      "name": "@parameters('blockRuleName')",
-                      "priority": "@int(parameters('blockRulePriority'))",
+                      "name": "@variables('targetRuleName')",
+                      "priority": "@variables('targetRulePriority')",
                       "ruleType": "MatchRule",
                       "action": "Block",
                       "state": "Enabled",
@@ -1119,7 +1083,7 @@
                           ],
                           "operator": "IPMatch",
                           "negationConditon": false,
-                          "matchValues": "@outputs('Compose_merged_addresses')",
+                          "matchValues": "@variables('targetRuleValues')",
                           "transforms": []
                         }
                       ]
@@ -1128,9 +1092,9 @@
                   },
                   "Compose_all_rules_application_gateway": {
                     "type": "Compose",
-                    "inputs": "@union(createArray(outputs('Compose_rule_application_gateway')), body('Filter_other_rules'))",
+                    "inputs": "@if(variables('targetRuleIsNew'), union(body('Select_rules_application_gateway'), createArray(outputs('Compose_rule_application_gateway'))), body('Select_rules_application_gateway'))",
                     "runAfter": {
-                      "Compose_rule_application_gateway": [
+                      "Select_rules_application_gateway": [
                         "Succeeded"
                       ]
                     }
@@ -1186,7 +1150,7 @@
                     "inputs": {
                       "body": {
                         "incidentArmId": "@triggerBody()?['object']?['id']",
-                        "message": "<p><strong>ASE POC playbook updated the Application Gateway WAF policy.</strong> Incident @{coalesce(triggerBody()?['object']?['properties']?['incidentNumber'], '')} (@{coalesce(triggerBody()?['object']?['properties']?['title'], '')}).</p><p>@{join(body('Select_blocked_lines_application_gateway'), '<br>')}</p><p>Custom rule @{parameters('blockRuleName')}, variable RemoteAddr, operator IPMatch, action Block, priority @{parameters('blockRulePriority')}. List size @{length(outputs('Compose_merged_addresses'))} of @{parameters('maximumBlockEntries')}. Other custom rules, including the simulated probe rule, were kept. Read-only policy links were not sent back on the PUT.</p><p>Rejected:<br>@{if(empty(variables('rejected')), 'none', join(variables('rejected'), '<br>'))}</p><p>Policy: @{parameters('wafPolicyResourceId')}</p><p>There is no automatic expiry. Rollback is an operator action. Logic App run: @{workflow()['run']['name']}</p>"
+                        "message": "<p><strong>ASE POC playbook updated the Application Gateway WAF policy.</strong> Incident @{coalesce(triggerBody()?['object']?['properties']?['incidentNumber'], '')} (@{coalesce(triggerBody()?['object']?['properties']?['title'], '')}).</p><p>@{join(body('Select_blocked_lines_application_gateway'), '<br>')}</p><p>Custom rule @{variables('targetRuleName')}, variable RemoteAddr, operator IPMatch, action Block, priority @{variables('targetRulePriority')}. List size @{length(variables('targetRuleValues'))} of 600. Other custom rules, including the simulated probe rule, were kept. Read-only policy links were not sent back on the PUT.</p><p>Rejected:<br>@{if(empty(variables('rejected')), 'none', join(variables('rejected'), '<br>'))}</p><p>Policy: @{parameters('wafPolicyResourceId')}</p><p>There is no automatic expiry. Rollback is an operator action. Logic App run: @{workflow()['run']['name']}</p>"
                       },
                       "host": {
                         "connection": {
@@ -1221,6 +1185,18 @@
                       "HTTP_-_Put_Application_Gateway_policy": [
                         "Failed",
                         "TimedOut"
+                      ]
+                    }
+                  },
+                  "Select_rules_application_gateway": {
+                    "type": "Select",
+                    "inputs": {
+                      "from": "@variables('existingCustomRules')",
+                      "select": "@if(equals(item()?['name'], variables('targetRuleName')), outputs('Compose_rule_application_gateway'), item())"
+                    },
+                    "runAfter": {
+                      "Compose_rule_application_gateway": [
+                        "Succeeded"
                       ]
                     }
                   }
@@ -1279,7 +1255,7 @@
             "inputs": {
               "body": {
                 "incidentArmId": "@triggerBody()?['object']?['id']",
-                "message": "<p><strong>ASE POC playbook dry-run.</strong> autoBlockEnabled is false. The WAF policy was not changed. Incident @{coalesce(triggerBody()?['object']?['properties']?['incidentNumber'], '')} (@{coalesce(triggerBody()?['object']?['properties']?['title'], '')}).</p><p>@{join(body('Select_dry_run_lines'), '<br>')}</p><p>Provider: @{parameters('wafProvider')}. Policy: @{parameters('wafPolicyResourceId')}. Custom rule that would be updated: @{parameters('blockRuleName')}. Resulting list size if blocking were enabled: @{length(outputs('Compose_merged_addresses'))} of @{parameters('maximumBlockEntries')}.</p><p>Rejected:<br>@{if(empty(variables('rejected')), 'none', join(variables('rejected'), '<br>'))}</p><p>Logic App run: @{workflow()['run']['name']}</p>"
+                "message": "<p><strong>ASE POC playbook dry-run.</strong> autoBlockEnabled is false. The WAF policy was not changed. Incident @{coalesce(triggerBody()?['object']?['properties']?['incidentNumber'], '')} (@{coalesce(triggerBody()?['object']?['properties']?['title'], '')}).</p><p>@{join(body('Select_dry_run_lines'), '<br>')}</p><p>Provider: @{parameters('wafProvider')}. Policy: @{parameters('wafPolicyResourceId')}. Custom rule that would be updated: @{variables('targetRuleName')}. Resulting list size if blocking were enabled: @{length(variables('targetRuleValues'))} of 600.</p><p>Rejected:<br>@{if(empty(variables('rejected')), 'none', join(variables('rejected'), '<br>'))}</p><p>Logic App run: @{workflow()['run']['name']}</p>"
               },
               "host": {
                 "connection": {
@@ -1309,10 +1285,519 @@
         }
       },
       "runAfter": {
-        "Check_block_list_capacity": [
+        "Check_need_new_rule": [
+          "Succeeded"
+        ]
+      }
+    },
+    "Initialize_target_rule": {
+      "type": "InitializeVariable",
+      "inputs": {
+        "variables": [
+          {
+            "name": "targetRuleName",
+            "type": "string",
+            "value": ""
+          },
+          {
+            "name": "targetRulePriority",
+            "type": "integer",
+            "value": 0
+          },
+          {
+            "name": "targetRuleValues",
+            "type": "array",
+            "value": []
+          },
+          {
+            "name": "targetRuleIsNew",
+            "type": "boolean",
+            "value": false
+          },
+          {
+            "name": "listedAddresses",
+            "type": "array",
+            "value": []
+          }
+        ]
+      },
+      "runAfter": {
+        "HTTP_-_Get_WAF_policy": [
+          "Succeeded"
+        ]
+      }
+    },
+    "For_each_block_list": {
+      "type": "Foreach",
+      "foreach": "@body('Filter_block_rule')",
+      "runtimeConfiguration": {
+        "concurrency": {
+          "repetitions": 1
+        }
+      },
+      "actions": {
+        "Set_listed_addresses": {
+          "type": "SetVariable",
+          "inputs": {
+            "name": "listedAddresses",
+            "value": "@union(variables('listedAddresses'), if(equals(parameters('wafProvider'), 'FrontDoor'), coalesce(item()?['matchConditions']?[0]?['matchValue'], json('[]')), coalesce(item()?['matchConditions']?[0]?['matchValues'], json('[]'))))"
+          },
+          "runAfter": {}
+        }
+      },
+      "runAfter": {
+        "Filter_block_rule": [
           "Succeeded"
         ],
-        "Filter_other_rules": [
+        "Initialize_target_rule": [
+          "Succeeded"
+        ]
+      }
+    },
+    "Filter_holder_rule": {
+      "type": "Query",
+      "inputs": {
+        "from": "@body('Filter_block_rule')",
+        "where": "@if(greater(length(outputs('Compose_distinct_candidates')), 0), contains(if(equals(parameters('wafProvider'), 'FrontDoor'), coalesce(item()?['matchConditions']?[0]?['matchValue'], json('[]')), coalesce(item()?['matchConditions']?[0]?['matchValues'], json('[]'))), first(outputs('Compose_distinct_candidates'))), false)"
+      },
+      "runAfter": {
+        "Filter_block_rule": [
+          "Succeeded"
+        ],
+        "Compose_distinct_candidates": [
+          "Succeeded"
+        ]
+      }
+    },
+    "For_each_select_existing_rule": {
+      "type": "Foreach",
+      "foreach": "@json('[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64, 65, 66, 67, 68, 69, 70, 71, 72, 73, 74, 75, 76, 77, 78, 79, 80, 81, 82, 83, 84, 85, 86, 87, 88, 89, 90, 91, 92, 93, 94, 95, 96, 97, 98, 99]')",
+      "runtimeConfiguration": {
+        "concurrency": {
+          "repetitions": 1
+        }
+      },
+      "actions": {
+        "Check_slot_still_open": {
+          "type": "If",
+          "expression": {
+            "equals": [
+              "@variables('targetRuleName')",
+              ""
+            ]
+          },
+          "actions": {
+            "Compose_slot_name": {
+              "type": "Compose",
+              "inputs": "@if(equals(items('For_each_select_existing_rule'), 0), parameters('blockRuleName'), concat(parameters('blockRuleName'), '-', string(add(items('For_each_select_existing_rule'), 1))))",
+              "runAfter": {}
+            },
+            "Filter_slot_rule": {
+              "type": "Query",
+              "inputs": {
+                "from": "@variables('existingCustomRules')",
+                "where": "@equals(item()?['name'], outputs('Compose_slot_name'))"
+              },
+              "runAfter": {
+                "Compose_slot_name": [
+                  "Succeeded"
+                ]
+              }
+            },
+            "Check_slot_has_room": {
+              "type": "If",
+              "expression": {
+                "and": [
+                  {
+                    "greater": [
+                      "@length(body('Filter_slot_rule'))",
+                      0
+                    ]
+                  },
+                  {
+                    "lessOrEquals": [
+                      "@length(union(if(equals(parameters('wafProvider'), 'FrontDoor'), coalesce(first(body('Filter_slot_rule'))?['matchConditions']?[0]?['matchValue'], json('[]')), coalesce(first(body('Filter_slot_rule'))?['matchConditions']?[0]?['matchValues'], json('[]'))), body('Filter_new_addresses')))",
+                      600
+                    ]
+                  }
+                ]
+              },
+              "actions": {
+                "Set_target_name": {
+                  "type": "SetVariable",
+                  "inputs": {
+                    "name": "targetRuleName",
+                    "value": "@outputs('Compose_slot_name')"
+                  },
+                  "runAfter": {}
+                },
+                "Set_target_priority": {
+                  "type": "SetVariable",
+                  "inputs": {
+                    "name": "targetRulePriority",
+                    "value": "@int(first(body('Filter_slot_rule'))?['priority'])"
+                  },
+                  "runAfter": {}
+                },
+                "Set_target_values": {
+                  "type": "SetVariable",
+                  "inputs": {
+                    "name": "targetRuleValues",
+                    "value": "@union(if(equals(parameters('wafProvider'), 'FrontDoor'), coalesce(first(body('Filter_slot_rule'))?['matchConditions']?[0]?['matchValue'], json('[]')), coalesce(first(body('Filter_slot_rule'))?['matchConditions']?[0]?['matchValues'], json('[]'))), body('Filter_new_addresses'))"
+                  },
+                  "runAfter": {}
+                },
+                "Set_target_is_new": {
+                  "type": "SetVariable",
+                  "inputs": {
+                    "name": "targetRuleIsNew",
+                    "value": false
+                  },
+                  "runAfter": {}
+                }
+              },
+              "else": {
+                "actions": {}
+              },
+              "runAfter": {
+                "Filter_slot_rule": [
+                  "Succeeded"
+                ]
+              }
+            }
+          },
+          "else": {
+            "actions": {}
+          },
+          "runAfter": {}
+        }
+      },
+      "runAfter": {
+        "Check_already_blocked": [
+          "Succeeded"
+        ]
+      }
+    },
+    "Select_taken_names": {
+      "type": "Select",
+      "inputs": {
+        "from": "@variables('existingCustomRules')",
+        "select": "@item()?['name']"
+      },
+      "runAfter": {
+        "Initialize_existingCustomRules": [
+          "Succeeded"
+        ]
+      }
+    },
+    "Select_used_priorities": {
+      "type": "Select",
+      "inputs": {
+        "from": "@variables('existingCustomRules')",
+        "select": "@item()?['priority']"
+      },
+      "runAfter": {
+        "Initialize_existingCustomRules": [
+          "Succeeded"
+        ]
+      }
+    },
+    "Check_need_new_rule": {
+      "type": "If",
+      "expression": {
+        "equals": [
+          "@variables('targetRuleName')",
+          ""
+        ]
+      },
+      "actions": {
+        "Check_cannot_add_rule": {
+          "type": "If",
+          "expression": {
+            "or": [
+              {
+                "greater": [
+                  "@length(body('Filter_new_addresses'))",
+                  600
+                ]
+              },
+              {
+                "greaterOrEquals": [
+                  "@length(variables('existingCustomRules'))",
+                  100
+                ]
+              }
+            ]
+          },
+          "actions": {
+            "Add_comment_-_list_full": {
+              "type": "ApiConnection",
+              "inputs": {
+                "body": {
+                  "incidentArmId": "@triggerBody()?['object']?['id']",
+                  "message": "<p><strong>ASE POC playbook refused to block.</strong> No block list custom rule can take another address, and a new custom rule cannot be added. Each rule holds at most 600 addresses. The WAF policy was not changed.</p><p>Logic App run: @{workflow()['run']['name']}</p>"
+                },
+                "host": {
+                  "connection": {
+                    "name": "@parameters('$connections')['azuresentinel']['connectionId']"
+                  }
+                },
+                "method": "post",
+                "path": "/Incidents/Comment"
+              },
+              "runAfter": {}
+            },
+            "Terminate_-_list_full": {
+              "type": "Terminate",
+              "inputs": {
+                "runStatus": "Succeeded"
+              },
+              "runAfter": {
+                "Add_comment_-_list_full": [
+                  "Succeeded"
+                ]
+              }
+            }
+          },
+          "else": {
+            "actions": {
+              "For_each_free_name": {
+                "type": "Foreach",
+                "foreach": "@json('[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64, 65, 66, 67, 68, 69, 70, 71, 72, 73, 74, 75, 76, 77, 78, 79, 80, 81, 82, 83, 84, 85, 86, 87, 88, 89, 90, 91, 92, 93, 94, 95, 96, 97, 98, 99]')",
+                "runtimeConfiguration": {
+                  "concurrency": {
+                    "repetitions": 1
+                  }
+                },
+                "actions": {
+                  "Check_name_still_open": {
+                    "type": "If",
+                    "expression": {
+                      "equals": [
+                        "@variables('targetRuleName')",
+                        ""
+                      ]
+                    },
+                    "actions": {
+                      "Compose_free_name": {
+                        "type": "Compose",
+                        "inputs": "@if(equals(items('For_each_free_name'), 0), parameters('blockRuleName'), concat(parameters('blockRuleName'), '-', string(add(items('For_each_free_name'), 1))))",
+                        "runAfter": {}
+                      },
+                      "Check_name_free": {
+                        "type": "If",
+                        "expression": {
+                          "not": {
+                            "contains": [
+                              "@body('Select_taken_names')",
+                              "@outputs('Compose_free_name')"
+                            ]
+                          }
+                        },
+                        "actions": {
+                          "Set_new_rule_name": {
+                            "type": "SetVariable",
+                            "inputs": {
+                              "name": "targetRuleName",
+                              "value": "@outputs('Compose_free_name')"
+                            },
+                            "runAfter": {}
+                          },
+                          "Set_new_rule_values": {
+                            "type": "SetVariable",
+                            "inputs": {
+                              "name": "targetRuleValues",
+                              "value": "@body('Filter_new_addresses')"
+                            },
+                            "runAfter": {}
+                          },
+                          "Set_new_rule_flag": {
+                            "type": "SetVariable",
+                            "inputs": {
+                              "name": "targetRuleIsNew",
+                              "value": true
+                            },
+                            "runAfter": {}
+                          }
+                        },
+                        "else": {
+                          "actions": {}
+                        },
+                        "runAfter": {
+                          "Compose_free_name": [
+                            "Succeeded"
+                          ]
+                        }
+                      }
+                    },
+                    "else": {
+                      "actions": {}
+                    },
+                    "runAfter": {}
+                  }
+                },
+                "runAfter": {}
+              },
+              "Compose_priority_start": {
+                "type": "Compose",
+                "inputs": "@if(equals(variables('targetRuleName'), parameters('blockRuleName')), int(parameters('blockRulePriority')), if(greater(add(int(parameters('blockRulePriority')), 1), 100), 1, add(int(parameters('blockRulePriority')), 1)))",
+                "runAfter": {
+                  "For_each_free_name": [
+                    "Succeeded"
+                  ]
+                }
+              },
+              "For_each_free_priority": {
+                "type": "Foreach",
+                "foreach": "@json('[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64, 65, 66, 67, 68, 69, 70, 71, 72, 73, 74, 75, 76, 77, 78, 79, 80, 81, 82, 83, 84, 85, 86, 87, 88, 89, 90, 91, 92, 93, 94, 95, 96, 97, 98, 99]')",
+                "runtimeConfiguration": {
+                  "concurrency": {
+                    "repetitions": 1
+                  }
+                },
+                "actions": {
+                  "Check_priority_still_open": {
+                    "type": "If",
+                    "expression": {
+                      "and": [
+                        {
+                          "not": {
+                            "equals": [
+                              "@variables('targetRuleName')",
+                              ""
+                            ]
+                          }
+                        },
+                        {
+                          "equals": [
+                            "@variables('targetRulePriority')",
+                            0
+                          ]
+                        }
+                      ]
+                    },
+                    "actions": {
+                      "Compose_priority_candidate": {
+                        "type": "Compose",
+                        "inputs": "@if(lessOrEquals(add(outputs('Compose_priority_start'), items('For_each_free_priority')), 100), add(outputs('Compose_priority_start'), items('For_each_free_priority')), sub(add(outputs('Compose_priority_start'), items('For_each_free_priority')), 100))",
+                        "runAfter": {}
+                      },
+                      "Check_priority_free": {
+                        "type": "If",
+                        "expression": {
+                          "not": {
+                            "contains": [
+                              "@body('Select_used_priorities')",
+                              "@outputs('Compose_priority_candidate')"
+                            ]
+                          }
+                        },
+                        "actions": {
+                          "Set_new_rule_priority": {
+                            "type": "SetVariable",
+                            "inputs": {
+                              "name": "targetRulePriority",
+                              "value": "@outputs('Compose_priority_candidate')"
+                            },
+                            "runAfter": {}
+                          }
+                        },
+                        "else": {
+                          "actions": {}
+                        },
+                        "runAfter": {
+                          "Compose_priority_candidate": [
+                            "Succeeded"
+                          ]
+                        }
+                      }
+                    },
+                    "else": {
+                      "actions": {}
+                    },
+                    "runAfter": {}
+                  }
+                },
+                "runAfter": {
+                  "Compose_priority_start": [
+                    "Succeeded"
+                  ]
+                }
+              },
+              "Check_create_failed": {
+                "type": "If",
+                "expression": {
+                  "or": [
+                    {
+                      "equals": [
+                        "@variables('targetRuleName')",
+                        ""
+                      ]
+                    },
+                    {
+                      "equals": [
+                        "@variables('targetRulePriority')",
+                        0
+                      ]
+                    }
+                  ]
+                },
+                "actions": {
+                  "Add_comment_-_no_rule_room": {
+                    "type": "ApiConnection",
+                    "inputs": {
+                      "body": {
+                        "incidentArmId": "@triggerBody()?['object']?['id']",
+                        "message": "<p><strong>ASE POC playbook refused to block.</strong> No block list custom rule can take another address, and a new custom rule cannot be added. Each rule holds at most 600 addresses. The WAF policy was not changed.</p><p>Logic App run: @{workflow()['run']['name']}</p>"
+                      },
+                      "host": {
+                        "connection": {
+                          "name": "@parameters('$connections')['azuresentinel']['connectionId']"
+                        }
+                      },
+                      "method": "post",
+                      "path": "/Incidents/Comment"
+                    },
+                    "runAfter": {}
+                  },
+                  "Terminate_-_no_rule_room": {
+                    "type": "Terminate",
+                    "inputs": {
+                      "runStatus": "Succeeded"
+                    },
+                    "runAfter": {
+                      "Add_comment_-_no_rule_room": [
+                        "Succeeded"
+                      ]
+                    }
+                  }
+                },
+                "else": {
+                  "actions": {}
+                },
+                "runAfter": {
+                  "For_each_free_priority": [
+                    "Succeeded"
+                  ]
+                }
+              }
+            }
+          },
+          "runAfter": {
+            "Select_taken_names": [
+              "Succeeded"
+            ],
+            "Select_used_priorities": [
+              "Succeeded"
+            ]
+          }
+        }
+      },
+      "else": {
+        "actions": {}
+      },
+      "runAfter": {
+        "For_each_select_existing_rule": [
           "Succeeded"
         ]
       }
