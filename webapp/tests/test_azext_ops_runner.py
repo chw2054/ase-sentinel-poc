@@ -9,7 +9,7 @@ import pytest
 
 _SPEC = importlib.util.spec_from_file_location(
     "azext_ops_runner",
-    Path(__file__).resolve().parents[2] / "extension" / "azext_ase" / "ops_runner.py",
+    Path(__file__).resolve().parents[2] / "az_extension" / "azext_ase" / "ops_runner.py",
 )
 ops = importlib.util.module_from_spec(_SPEC)
 _SPEC.loader.exec_module(ops)

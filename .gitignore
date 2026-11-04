@@ -16,9 +16,9 @@ ase-out/
 scripts/__pycache__/
 scripts/.pytest_cache/
 .pytest_cache/
-extension/build/
-extension/*.egg-info/
-extension/**/__pycache__/
+az_extension/build/
+az_extension/*.egg-info/
+az_extension/**/__pycache__/
 infra/main.json
 
 # Editor
