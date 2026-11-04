@@ -1,9 +1,22 @@
+import configparser
 import os
 import subprocess
 from pathlib import Path
 
+from azure.cli.core._config import GLOBAL_CONFIG_PATH
+from azure.cli.core._profile import Profile
 from azure.cli.core.azclierror import UnclassifiedUserFault
 from knack.log import get_logger
+
+from .ops_runner import (
+    OpsError,
+    blocks_from,
+    incident_from,
+    incidents_from,
+    python_executable,
+    repo_root,
+    run_ops,
+)
 
 log = get_logger(__name__)
 
@@ -95,17 +108,112 @@ def _run(
         raise UnclassifiedUserFault(f"scripts/ase.ps1 {action} exited {completed.returncode}")
 
 
-def _repo_root() -> Path:
-    configured = os.environ.get("ASE_POC_ROOT")
-    if configured:
-        root = Path(configured)
-        if (root / "scripts" / "ase.ps1").is_file():
-            return root
-        raise UnclassifiedUserFault(f"ASE_POC_ROOT does not contain scripts/ase.ps1: {root}")
-    cursor = Path.cwd()
-    for candidate in [cursor, *cursor.parents]:
-        if (candidate / "scripts" / "ase.ps1").is_file() and (candidate / "profiles" / "poc.json").is_file():
-            return candidate
-    raise UnclassifiedUserFault(
-        "Could not find the PoC repo. Run this from ase-sentinel-poc, or set ASE_POC_ROOT."
+def list_incidents(
+    cmd,
+    subscription_id,
+    resource_group,
+    workspace_name,
+    waf_policy_resource_id,
+    python_path=None,
+):
+    payload = _ops(
+        cmd,
+        ["list"],
+        subscription_id,
+        resource_group,
+        workspace_name,
+        waf_policy_resource_id,
+        python_path,
     )
+    return incidents_from(payload)
+
+
+def show_incident(
+    cmd,
+    incident_id,
+    subscription_id,
+    resource_group,
+    workspace_name,
+    waf_policy_resource_id,
+    python_path=None,
+):
+    payload = _ops(
+        cmd,
+        ["show", incident_id],
+        subscription_id,
+        resource_group,
+        workspace_name,
+        waf_policy_resource_id,
+        python_path,
+    )
+    return incident_from(payload)
+
+
+def list_blocks(
+    cmd,
+    subscription_id,
+    resource_group,
+    workspace_name,
+    waf_policy_resource_id,
+    python_path=None,
+):
+    payload = _ops(
+        cmd,
+        ["inventory"],
+        subscription_id,
+        resource_group,
+        workspace_name,
+        waf_policy_resource_id,
+        python_path,
+    )
+    rows, gateway_error = blocks_from(payload)
+    if gateway_error:
+        log.warning(gateway_error)
+    return rows
+
+
+def _ops(cmd, args, subscription_id, resource_group, workspace_name, policy_id, python_path):
+    repo = _repo_root()
+    webapp = repo / "webapp"
+    try:
+        python = python_executable(webapp, python_path)
+        return run_ops(
+            python,
+            webapp,
+            args,
+            _arm_token(cmd, subscription_id),
+            subscription_id,
+            resource_group,
+            workspace_name,
+            policy_id,
+        )
+    except OpsError as exc:
+        raise UnclassifiedUserFault(str(exc)) from exc
+
+
+def _arm_token(cmd, subscription_id: str) -> str:
+    profile = Profile(cli_ctx=cmd.cli_ctx)
+    creds, _, _ = profile.get_raw_token(
+        subscription=subscription_id,
+        resource="https://management.azure.com/",
+    )
+    token = creds[1]
+    if not isinstance(token, str):
+        raise OpsError("Azure CLI did not return an ARM token. Run az login.")
+    return token
+
+
+def _repo_root() -> Path:
+    try:
+        return repo_root(Path.cwd(), os.environ.get("ASE_POC_ROOT"), _configured_repo_root())
+    except OpsError as exc:
+        raise UnclassifiedUserFault(str(exc)) from exc
+
+
+def _configured_repo_root() -> str | None:
+    parser = configparser.ConfigParser(interpolation=None)
+    parser.read(GLOBAL_CONFIG_PATH, encoding="utf-8")
+    if not parser.has_option("ase", "repo_root"):
+        return None
+    value = parser.get("ase", "repo_root").strip()
+    return value or None

@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "azure-cli-ase"
 version = "0.1.0"
-description = "Diff and deploy the ASE Sentinel WAF proof of concept."
+description = "Diff, deploy, and read Sentinel incidents and the WAF block list."
 
 [tool.setuptools.packages.find]
 include = ["azext_ase*"]

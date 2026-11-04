@@ -2,7 +2,32 @@ from knack.help_files import helps
 
 helps["ase"] = """
 type: group
-short-summary: Diff and deploy the ASE Sentinel WAF proof of concept.
+short-summary: Diff, deploy, and read Sentinel incidents and the WAF block list.
+"""
+
+helps["ase incident"] = """
+type: group
+short-summary: Read open Microsoft Sentinel incidents.
+"""
+
+helps["ase incident list"] = """
+type: command
+short-summary: List open incidents and their IPv4 addresses.
+"""
+
+helps["ase incident show"] = """
+type: command
+short-summary: Show one incident and its IPv4 addresses.
+"""
+
+helps["ase block"] = """
+type: group
+short-summary: Read the pinned Application Gateway WAF policy.
+"""
+
+helps["ase block list"] = """
+type: command
+short-summary: List SentinelAutoBlock addresses on the pinned policy.
 """
 
 helps["ase diff"] = """

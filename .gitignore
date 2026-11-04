@@ -18,6 +18,7 @@ scripts/.pytest_cache/
 .pytest_cache/
 extension/build/
 extension/*.egg-info/
+extension/**/__pycache__/
 infra/main.json
 
 # Editor
