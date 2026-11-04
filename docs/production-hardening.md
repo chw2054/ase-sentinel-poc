@@ -11,7 +11,7 @@ Items below are recommendations for a later design. They are not implemented in 
 
 ## Replace dry-run with an approval, not with an always-on PUT
 
-This POC uses the playbook approval and the web app flag as the gates. Record who approved the change on the incident. The current automation rule labels the incident and starts the playbook immediately. The playbook forwards the incident to the operations web app and waits for Office 365 approval before `execution=enforce`.
+This POC uses the playbook approval and the web app flag as the gates. Record who approved the change on the incident. The current automation rule labels the incident and starts the playbook immediately. The playbook forwards the incident to the operations web app and waits for Office 365 approval before `execution=approved`.
 
 ## Narrow the write permission
 
@@ -19,7 +19,7 @@ Network Contributor on the policy is a POC shortcut. Replace it with a custom ro
 
 ## Make the block list operable
 
-- Alert when the playbook run fails, when the list reaches `maximumBlockEntries`, and when a PUT succeeds.
+- Alert when the playbook run fails, when a block rule reaches 600 match values or the policy reaches 100 custom rules, and when a PUT succeeds.
 - Store the incident id, address, rule, and time somewhere that survives incident deletion if ASE's retention question requires that. The incident comment is the only evidence store in this POC.
 - Define who may remove an address, the maximum age of an entry, and whether removal is another reviewed change. This repo has no expiry job.
 - Put `If-Match` on the PUT, or use a patch API if the policy type provides one, so a portal edit is not overwritten.

@@ -1,6 +1,6 @@
 # Security considerations
 
-The operations web app changes a WAF policy when the effective block flag is the JSON boolean `true`. `AUTO_BLOCK_ENABLED` on the web app is that flag. The playbook sends `execution=dry-run` and, after approval, `execution=enforce`. `execution=enforce` writes for that call even when the app setting is `false`. `execution=dry-run` does not write. The template parameter `autoBlockEnabled` is a deployment output and does not set the web app. The strings `True` and `False` are rejected.
+The operations web app changes a WAF policy when the effective block flag is the JSON boolean `true`. `AUTO_BLOCK_ENABLED` on the web app is that flag. The playbook sends `execution=awaiting-approval` and, after approval, `execution=approved`. `execution=approved` writes for that call even when the app setting is `false`. `execution=awaiting-approval` does not write. `dry-run` and `enforce` are rejected. The template parameter `autoBlockEnabled` is a deployment output and does not set the web app. The strings `True` and `False` are rejected.
 
 ## Identity
 
@@ -32,11 +32,11 @@ Customer ranges the web app cannot parse fail the run before any block decision,
 
 ## Dry-run and opt-in
 
-The web app sends a PUT only when the effective flag is the JSON boolean `true`. The string `"true"` stays a dry-run when `execution` is omitted. Dry-run still GETs the policy so it can avoid saying "Would block" for an address that is already listed. GET does not modify the policy. An incident with no canonical IPv4 address does not GET. The web app rejects those values and does not change the policy.
+The web app sends a PUT only when the effective flag is the JSON boolean `true`. The string `"true"` stays `awaiting-approval` when `execution` is omitted and does not write. That call still GETs the policy so it can avoid saying "Would block" for an address that is already listed. GET does not modify the policy. An incident with no canonical IPv4 address does not GET. The web app rejects those values and does not change the policy.
 
-Duplicates are removed with `union` before a write. A second incident for an address already on the rule does not PUT. If the merged list would exceed `maximumBlockEntries`, nothing is written.
+Duplicates are removed before a write. A second incident for an address already on a SentinelAutoBlock rule does not PUT. One custom rule holds 600 match values. When that rule would exceed 600, the engine selects the next SentinelAutoBlock rule on the same policy. When the new batch itself exceeds 600, the policy already has 100 custom rules, or priorities 1–100 are full, the result is `capacity-exceeded` and nothing is written.
 
-The automation rule starts the playbook and does not itself approve a block. The playbook waits for an Office 365 approval before it sends `execution=enforce`. Keep `AUTO_BLOCK_ENABLED` false on the web app unless a request is supposed to write when `execution` is omitted.
+The automation rule starts the playbook and does not itself approve a block. The playbook waits for an Office 365 approval before it sends `execution=approved`. Keep `AUTO_BLOCK_ENABLED` false on the web app unless a request is supposed to write when `execution` is omitted.
 
 ## Evidence
 

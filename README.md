@@ -124,7 +124,6 @@ Defaults that matter:
 | `queryFrequencyMinutes` | `5` | Sentinel minimum schedule |
 | `queryLookbackMinutes` | `30` | Observation window |
 | `protectedIpRanges` | empty | Customer ranges, in addition to the built-in ranges |
-| `maximumBlockEntries` | `100` | Accepted so older commands parse. The script does not apply it. The web app setting `MAXIMUM_BLOCK_ENTRIES` is separate |
 | `overrideProtectedRanges` | `false` | Do not skip protected ranges |
 
 Preview without writes:
@@ -202,7 +201,7 @@ The web app writes the decision comment. The Logic App writes a comment when ent
 
 ## How dry-run works
 
-The Bicep default of `autoBlockEnabled` is `true` in `infra/parameters/main.bicepparam` and in `scripts/deploy.ps1`. The live operations app keeps `AUTO_BLOCK_ENABLED` as the JSON boolean `false`. The playbook sends `execution=dry-run`, then `execution=enforce` only after approval. If the setting is missing, the service stays in dry-run unless that request sets `execution`.
+The Bicep default of `autoBlockEnabled` is `true` in `infra/parameters/main.bicepparam` and in `scripts/deploy.ps1`. The live operations app keeps `AUTO_BLOCK_ENABLED` as the JSON boolean `false`. The playbook sends `execution=awaiting-approval`, then `execution=approved` only after approval. If the setting is missing, the response status is `awaiting-approval` and the policy is not written unless that request sets `execution` to `approved`.
 
 When the effective value is not the boolean `true`:
 
@@ -215,14 +214,7 @@ A customer range the web app cannot evaluate (`/12`, `/10`, `/40`, a value that 
 
 ## How blocking and dry-run are selected
 
-Blocking is the default. `-ConfirmAutoBlock` is accepted and is not required. A dry-run deploy passes `-AutoBlockEnabled $false` with the same resource group and name prefix:
-
-```powershell
-./scripts/deploy.ps1 `
-  -ResourceGroupName rg-ase-sentinel-poc `
-  -NamePrefix ase-sentinel-poc `
-  -AutoBlockEnabled $false
-```
+Keep `AUTO_BLOCK_ENABLED=false` on the operations web app. The playbook sends `execution=awaiting-approval` for evaluation and `execution=approved` only after approval. The approved request enables a write for that call. Do not redeploy the playbook to change the app setting.
 
 `scripts/deploy.ps1` records `autoBlockEnabled` on the deployment output and does not write the web app setting `AUTO_BLOCK_ENABLED`. The engine accepts only the JSON tokens `true` and `false`. The strings `True` and `False` make that request return HTTP 500. This does not rewrite a previous incident.
 
@@ -286,7 +278,7 @@ That deletes the workspace, Sentinel, the playbook, the test gateway, and a WAF 
 
 ## Known limitations
 
-- Bicep was built with `az bicep build`. The Application Gateway path was deployed and the analytics query was run against the live workspace. Front Door was not deployed. The live web app keeps `AUTO_BLOCK_ENABLED` false. A playbook call uses `execution=dry-run`, then `execution=enforce` only after approval. `-AutoBlockEnabled` on the deploy script does not change that app setting.
+- Bicep was built with `az bicep build`. The Application Gateway path was deployed and the analytics query was run against the live workspace. Front Door was not deployed. The live web app keeps `AUTO_BLOCK_ENABLED` false. A playbook call uses `execution=awaiting-approval`, then `execution=approved` only after approval. `-AutoBlockEnabled` on the deploy script does not change that app setting.
 - The test gateway is HTTP/80, with dummy backend `192.0.2.10`, no TLS, no NSG, and no availability zones. Those are POC shortcuts. See [docs/production-hardening.md](docs/production-hardening.md).
 - WAF_v2 cost starts when the gateway exists and stops when the resource group delete finishes.
 - Microsoft documents that an Application Gateway custom block rule is logged and **not** enforced while the policy is in Detection mode. The default here is Prevention so the probe returns 403 and the log action can be `Blocked`. The query also accepts `Detected` so a Detection-mode log can still open an incident. If a live workspace shows a different `Action` value, change the query after you see that value. Do not add action names that have not been observed.

@@ -26,7 +26,7 @@ Outputs include the workspace name, workspace resource id, policy id, playbook n
 - `FrontDoor` requires `-DeployTestWaf $false` and either `-ExistingWafPolicyName` or `-ExistingWafPolicyResourceId`
 - The test rig rejects an existing policy name or id at the same time, so a deploy cannot silently ignore one
 - An existing resource id must be the ARM type for the selected provider
-- `-AutoBlockEnabled` defaults to `$true`. `$false` deploys a dry-run. `-ConfirmAutoBlock` is accepted and is not required
+- `-AutoBlockEnabled` defaults to `$true`. `$false` is recorded on the deployment output. The script does not write `AUTO_BLOCK_ENABLED` on the web app
 - `-OverrideProtectedRanges $true` requires `-ConfirmOverrideProtectedRanges`
 - Each `ProtectedIpRanges` entry is an IPv4 address or `/8`, `/16`, `/24`, `/32`. Any other form is rejected.
 - `NamePrefix` is 3 to 24 characters of lowercase letters, digits, and hyphens
@@ -103,7 +103,7 @@ The template no longer creates Application Insights or a storage account. Increm
 
 ## Dry-run
 
-Keep `AUTO_BLOCK_ENABLED` as the JSON token `false` on the operations web app. The playbook sends `execution=dry-run`, then `execution=enforce` only after approval. `execution=enforce` writes for that call. `execution=dry-run` does not. `-AutoBlockEnabled $false` changes the deployment output only. Do not redeploy the live playbook to change that flag.
+Keep `AUTO_BLOCK_ENABLED` as the JSON token `false` on the operations web app. The playbook sends `execution=awaiting-approval`, then `execution=approved` only after approval. `execution=approved` writes for that call. `execution=awaiting-approval` does not. `-AutoBlockEnabled $false` changes the deployment output only. Do not redeploy the live playbook to change that flag.
 
 ## Destroy
 
