@@ -1,0 +1,108 @@
+{
+  "name": "ase-sentinel-ops",
+  "displayName": "ASE Sentinel Ops",
+  "description": "Read open Sentinel incidents and the WAF block list with your Entra sign-in.",
+  "version": "0.1.0",
+  "publisher": "ase-sentinel",
+  "license": "MIT",
+  "engines": {
+    "vscode": "^1.90.0"
+  },
+  "categories": ["Azure"],
+  "extensionKind": ["workspace"],
+  "main": "./src/extension.js",
+  "activationEvents": [
+    "onView:aseSentinel.incidents",
+    "onCommand:aseSentinel.signIn"
+  ],
+  "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "ase-sentinel",
+          "title": "ASE Sentinel",
+          "icon": "media/icon.svg"
+        }
+      ]
+    },
+    "views": {
+      "ase-sentinel": [
+        {
+          "id": "aseSentinel.incidents",
+          "name": "Open incidents"
+        },
+        {
+          "id": "aseSentinel.blocks",
+          "name": "Block list"
+        }
+      ]
+    },
+    "commands": [
+      {
+        "command": "aseSentinel.signIn",
+        "title": "ASE Sentinel: Sign in",
+        "icon": "$(account)"
+      },
+      {
+        "command": "aseSentinel.refresh",
+        "title": "ASE Sentinel: Refresh",
+        "icon": "$(refresh)"
+      }
+    ],
+    "menus": {
+      "view/title": [
+        {
+          "command": "aseSentinel.refresh",
+          "when": "view == aseSentinel.incidents || view == aseSentinel.blocks",
+          "group": "navigation"
+        },
+        {
+          "command": "aseSentinel.signIn",
+          "when": "view == aseSentinel.incidents",
+          "group": "navigation@1"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "ASE Sentinel",
+      "properties": {
+        "aseSentinel.subscriptionId": {
+          "type": "string",
+          "default": "",
+          "scope": "resource",
+          "markdownDescription": "Subscription GUID. Reads use this value and do not follow the Azure CLI default."
+        },
+        "aseSentinel.resourceGroup": {
+          "type": "string",
+          "default": "",
+          "scope": "resource",
+          "markdownDescription": "Resource group that contains the Sentinel workspace and the WAF policy."
+        },
+        "aseSentinel.workspaceName": {
+          "type": "string",
+          "default": "",
+          "scope": "resource",
+          "markdownDescription": "Log Analytics workspace name that hosts Microsoft Sentinel."
+        },
+        "aseSentinel.wafPolicyResourceId": {
+          "type": "string",
+          "default": "",
+          "scope": "resource",
+          "markdownDescription": "Full ARM id of the one Application Gateway WAF policy to read."
+        },
+        "aseSentinel.webappPath": {
+          "type": "string",
+          "default": "",
+          "scope": "resource",
+          "markdownDescription": "Path of the repo `webapp` directory. Empty uses the workspace `webapp` folder."
+        },
+        "aseSentinel.pythonPath": {
+          "type": "string",
+          "default": "",
+          "scope": "resource",
+          "markdownDescription": "Python executable that can import this repo. Empty uses `webapp/.venv` when it exists."
+        }
+      }
+    }
+  }
+}
