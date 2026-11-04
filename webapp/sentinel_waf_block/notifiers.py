@@ -11,7 +11,7 @@ from typing import Any
 
 from sentinel_waf_block.engine import NotifyError
 from sentinel_waf_block.models import (
-    STATUS_BLOCKED,
+    STATUS_APPROVED,
     STATUS_CAPACITY,
     STATUS_PUT,
     Result,
@@ -39,8 +39,9 @@ _TITLES = {
     EVENT_CAPACITY: "ASE POC refused to block: the block list is full",
 }
 
-# The HTTP result stays "dry-run": the playbook starts the approval only when
-# that status comes back with new addresses. The card names the wait itself.
+# The API status for this event is already "awaiting-approval". The card
+# repeats that word. The playbook starts approval only when that status
+# comes back with new addresses.
 _CARD_STATUS = {
     EVENT_WOULD_BLOCK: "awaiting-approval",
 }
@@ -76,7 +77,7 @@ def _message(event: str, result: Result) -> dict[str, Any]:
     if result.notify_error:
         facts.append({"title": "Comment to Sentinel", "value": result.comment_error or "written"})
         facts.append({"title": "Notification", "value": "not delivered: " + result.notify_error})
-    if result.reason and result.status not in {STATUS_BLOCKED, STATUS_PUT}:
+    if result.reason and result.status not in {STATUS_APPROVED, STATUS_PUT}:
         facts.append({"title": "Reason", "value": result.reason})
     card = {
         "type": "AdaptiveCard",

@@ -29,11 +29,11 @@ log = logging.getLogger("sentinel_waf_block.service")
 
 def execution_override(execution: str, config: Config) -> Config:
     # execution is authoritative and fail-closed. The playbook sends
-    # execution=enforce only after an approver chose Approve. The operations
+    # execution=approved only after an approver chose Approve. The operations
     # app sends it for a manual add, remove, or incident block.
-    if execution == "enforce":
+    if execution == "approved":
         return replace(config, auto_block_enabled=True)
-    if execution == "dry-run":
+    if execution == "awaiting-approval":
         return replace(config, auto_block_enabled=False)
     return config
 

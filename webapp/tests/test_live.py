@@ -196,13 +196,13 @@ def _block_result(recorded: list[dict]):
             }
         if payload.get("operation") == "add":
             return 200, {
-                "status": "blocked",
+                "status": "approved",
                 "changed": True,
                 "written_rule": "SentinelAutoBlock-2",
                 "new_addresses": ["203.0.113.0/24"],
                 "notify_error": "",
             }
-        return 200, {"status": "blocked", "changed": True, "notify_error": ""}
+        return 200, {"status": "approved", "changed": True, "notify_error": ""}
 
     return block
 
@@ -268,7 +268,7 @@ def test_home_lists_the_sentinel_incident_and_skips_sql() -> None:
     assert not any("webapp-data" in str(call.url) for call in calls)
 
 
-def test_block_posts_execution_enforce_and_does_not_close() -> None:
+def test_block_posts_execution_approved_and_does_not_close() -> None:
     calls: list[httpx.Request] = []
     recorded: list[dict] = []
     api = client(calls, recorded)
@@ -277,7 +277,7 @@ def test_block_posts_execution_enforce_and_does_not_close() -> None:
     assert response.status_code == 303
     assert "SentinelAutoBlock" in response.headers["location"]
     assert len(recorded) == 1
-    assert recorded[0]["execution"] == "enforce"
+    assert recorded[0]["execution"] == "approved"
     assert recorded[0]["ipEntities"] == ["203.0.113.9"]
     assert recorded[0]["incidentArmId"] == ARM_ID
     assert not any(call.method == "PUT" and "/comments/" in str(call.url) for call in calls)
@@ -299,8 +299,8 @@ def test_block_page_adds_and_removes_an_ip_or_cidr() -> None:
     removed = api.post("/blocks/remove", data={"address": "198.51.100.4"}, follow_redirects=False)
     assert removed.status_code == 303
     assert "Removed%20198.51.100.4" in removed.headers["location"]
-    assert recorded[0] == {"operation": "add", "address": "203.0.113.5/24", "execution": "enforce"}
-    assert recorded[1] == {"operation": "remove", "address": "198.51.100.4", "execution": "enforce"}
+    assert recorded[0] == {"operation": "add", "address": "203.0.113.5/24", "execution": "approved"}
+    assert recorded[1] == {"operation": "remove", "address": "198.51.100.4", "execution": "approved"}
     assert not any(call.method == "PUT" for call in calls)
 
 
@@ -348,24 +348,24 @@ def test_playbook_api_requires_the_shared_key() -> None:
     calls: list[httpx.Request] = []
     recorded: list[dict] = []
     api = client(calls, recorded)
-    missing = api.post("/api/SentinelWafAutoBlock", json={"execution": "dry-run"})
+    missing = api.post("/api/SentinelWafAutoBlock", json={"execution": "awaiting-approval"})
     assert missing.status_code == 401
     assert missing.json()["reason"] == "unauthorized"
     wrong = api.post(
         "/api/SentinelWafAutoBlock",
         headers={"x-functions-key": "nope"},
-        json={"execution": "dry-run"},
+        json={"execution": "awaiting-approval"},
     )
     assert wrong.status_code == 401
     assert recorded == []
     accepted = api.post(
         "/api/SentinelWafAutoBlock",
         headers={"x-functions-key": "test-key"},
-        json={"incidentArmId": ARM_ID, "execution": "dry-run"},
+        json={"incidentArmId": ARM_ID, "execution": "awaiting-approval"},
     )
     assert accepted.status_code == 200
-    assert accepted.json()["status"] == "blocked"
-    assert recorded == [{"incidentArmId": ARM_ID, "execution": "dry-run"}]
+    assert accepted.json()["status"] == "approved"
+    assert recorded == [{"incidentArmId": ARM_ID, "execution": "awaiting-approval"}]
     garbage = api.post(
         "/api/SentinelWafAutoBlock",
         headers={"x-functions-key": "test-key"},

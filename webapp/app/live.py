@@ -1,6 +1,6 @@
 """Live operations pages. Sentinel is the queue and the WAF policy is the block list.
 
-Block, add, and remove call the in-process engine with execution=enforce. That
+Block, add, and remove call the in-process engine with execution=approved. That
 one field writes a block-list rule even when AUTO_BLOCK_ENABLED is false.
 The playbook posts the same engine at /api/SentinelWafAutoBlock.
 Don't block only comments and closes the incident.
@@ -275,7 +275,7 @@ class SentinelAzure:
             + provider
         )
 
-    def enforce(self, incident: LiveIncident) -> dict:
+    def approve(self, incident: LiveIncident) -> dict:
         if not incident.ips:
             raise AzureCallError("this incident has no IPv4 address")
         if not incident.arm_id.startswith("/"):
@@ -286,12 +286,12 @@ class SentinelAzure:
                 "incidentNumber": incident.number,
                 "incidentTitle": incident.title,
                 "ipEntities": list(incident.ips),
-                "execution": "enforce",
+                "execution": "approved",
             }
         )
 
     def change_block(self, address: str, operation: str) -> dict:
-        return self._call_block({"operation": operation, "address": address, "execution": "enforce"})
+        return self._call_block({"operation": operation, "address": address, "execution": "approved"})
 
     def _call_block(self, payload: dict) -> dict:
         status, body = self.block(payload)
@@ -510,14 +510,14 @@ def _routes():
             return RedirectResponse("/?error=" + quote("Unknown incident"), status_code=303)
         try:
             incident = request.app.state.azure.get(incident_id)
-            result = request.app.state.azure.enforce(incident)
+            result = request.app.state.azure.approve(incident)
         except AzureCallError as exc:
             return RedirectResponse(f"/incidents/{incident_id}?error=" + quote(str(exc)), status_code=303)
         status = str(result.get("status") or "")
-        if status not in {"blocked", "already-blocked"}:
+        if status not in {"approved", "already-blocked"}:
             reason = str(result.get("reason") or status or "the block service did not write the policy")
             return RedirectResponse(f"/incidents/{incident_id}?error=" + quote(reason[:300]), status_code=303)
-        message = "The address is on SentinelAutoBlock." if status == "blocked" else "The address was already on SentinelAutoBlock."
+        message = "The address is on SentinelAutoBlock." if status == "approved" else "The address was already on SentinelAutoBlock."
         if result.get("notify_error"):
             message += " The Teams notification was not delivered."
         return RedirectResponse(f"/incidents/{incident_id}?message=" + quote(message), status_code=303)
@@ -568,7 +568,7 @@ def _edit_block(request: Request, address: str, operation: str):
     status = str(result.get("status") or "")
     stored = result.get("new_addresses") or result.get("candidate_addresses") or [address]
     shown = stored[0] if isinstance(stored, list) and stored else address
-    if operation == "add" and status == "blocked":
+    if operation == "add" and status == "approved":
         rule = str(result.get("written_rule") or "the block list")
         message = f"Added {shown} to {rule}."
     elif operation == "add" and status == "already-blocked":

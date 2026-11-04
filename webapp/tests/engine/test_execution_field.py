@@ -13,13 +13,13 @@ def _incident(execution: str) -> Incident:
     return Incident(arm_id=INCIDENT_ID, number="1", title="t", ip_entities=("203.0.113.5",), execution=execution)
 
 
-def test_enforce_overrides_the_false_setting() -> None:
-    merged = effective_config(_incident("enforce"), BASE)
+def test_approved_overrides_the_false_setting() -> None:
+    merged = effective_config(_incident("approved"), BASE)
     assert merged.auto_block_enabled is True
 
 
-def test_dry_run_overrides_the_true_setting() -> None:
-    merged = effective_config(_incident("dry-run"), Config(waf_policy_resource_id="/s", waf_provider="ApplicationGateway", auto_block_enabled=True))
+def test_awaiting_approval_overrides_the_true_setting() -> None:
+    merged = effective_config(_incident("awaiting-approval"), Config(waf_policy_resource_id="/s", waf_provider="ApplicationGateway", auto_block_enabled=True))
     assert merged.auto_block_enabled is False
 
 
@@ -28,7 +28,7 @@ def test_absent_execution_keeps_the_setting() -> None:
 
 
 def test_unknown_execution_is_rejected() -> None:
-    for bad in ("ENFORCE", "block", "approve", None, True):
+    for bad in ("dry-run", "enforce", "ENFORCE", "block", "approve", None, True):
         payload = {
             "incidentArmId": INCIDENT_ID,
             "incidentNumber": "1",

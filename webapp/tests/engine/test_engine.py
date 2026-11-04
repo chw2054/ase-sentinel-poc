@@ -24,7 +24,7 @@ def engine(waf: FakeWaf | None = None, comments: FakeComments | None = None) -> 
 def test_valid_public_ipv4_dry_run_does_not_put() -> None:
     app, waf, comments = engine()
     result = app.execute(incident("203.0.113.5"), config())
-    assert result.status == "dry-run"
+    assert result.status == "awaiting-approval"
     assert result.changed is False
     assert result.new_addresses == ("203.0.113.5",)
     assert "Would block IP: 203.0.113.5" in result.comment
@@ -115,7 +115,7 @@ def test_mixed_incident_puts_ipv4_and_rejects_other_text() -> None:
     document = agw_policy(probe_rule())
     app, waf, _comments = engine(FakeWaf(document))
     result = app.execute(incident("203.0.113.5", "2001:db8::1"), config(auto_block_enabled=True))
-    assert result.status == "blocked"
+    assert result.status == "approved"
     assert result.changed is True
     assert result.new_addresses == ("203.0.113.5",)
     assert result.rejected_addresses[0].reason == REASON_INVALID_V4
@@ -131,12 +131,12 @@ def test_mixed_incident_puts_ipv4_and_rejects_other_text() -> None:
 def test_string_true_does_not_put_and_override_still_rejects_non_ipv4() -> None:
     app, waf, _comments = engine()
     dry = app.execute(incident("203.0.113.5"), config(auto_block_enabled="true"))
-    assert dry.status == "dry-run"
+    assert dry.status == "awaiting-approval"
     assert waf.puts == []
 
     app, waf, _comments = engine()
     overridden = app.execute(incident("10.1.2.3", "2001:db8::1"), config(override_protected_ranges=True))
-    assert overridden.status == "dry-run"
+    assert overridden.status == "awaiting-approval"
     assert overridden.new_addresses == ("10.1.2.3",)
     assert overridden.rejected_addresses[0].reason == REASON_INVALID_V4
     assert waf.puts == []
@@ -161,7 +161,7 @@ def test_front_door_keeps_other_rules_when_blocking_ipv4() -> None:
     probe = {"name": "PocSimulatedProbe", "action": "Block", "matchConditions": []}
     app, waf, _comments = engine(FakeWaf(front_door_policy(probe, rule)))
     result = app.execute(incident("203.0.113.5"), front_door(auto_block_enabled=True))
-    assert result.status == "blocked"
+    assert result.status == "approved"
     written = waf.puts[0]["properties"]["customRules"]["rules"][0]["matchConditions"][0]["matchValue"]
     assert written == ["198.51.100.8", "203.0.113.5"]
     assert waf.puts[0]["properties"]["customRules"]["rules"][1] == probe
@@ -176,7 +176,7 @@ def test_existing_match_strings_are_copied_and_other_rules_stay() -> None:
     document = agw_policy(first, block, probe)
     app, waf, _comments = engine(FakeWaf(document))
     result = app.execute(incident("203.0.113.5"), config(auto_block_enabled=True))
-    assert result.status == "blocked"
+    assert result.status == "approved"
     body = waf.puts[0]
     assert set(body) == {"location", "tags", "properties"}
     assert set(body["properties"]) == {"policySettings", "customRules", "managedRules"}
@@ -234,7 +234,7 @@ def test_full_rule_creates_the_next_block_list() -> None:
     document = agw_policy(probe_rule(), agw_block_rule(_full_policy()))
     app, waf, _comments = engine(FakeWaf(document))
     result = app.execute(incident("203.0.113.5"), config(auto_block_enabled=True))
-    assert result.status == "blocked"
+    assert result.status == "approved"
     assert result.written_rule == "SentinelAutoBlock-2"
     assert result.written_priority == 11
     assert result.policy_resource_id == config().waf_policy_resource_id
@@ -254,7 +254,7 @@ def test_full_rule_uses_the_next_block_list_that_has_room() -> None:
     document = agw_policy(probe_rule(), agw_block_rule(_full_policy()), second)
     app, waf, _comments = engine(FakeWaf(document))
     result = app.execute(incident("203.0.113.5"), config(auto_block_enabled=True))
-    assert result.status == "blocked"
+    assert result.status == "approved"
     assert result.written_rule == "SentinelAutoBlock-2"
     rules = waf.puts[0]["properties"]["customRules"]
     names = [rule["name"] for rule in rules]
@@ -273,7 +273,7 @@ def test_address_is_written_to_the_first_block_list_with_room() -> None:
     document = agw_policy(agw_block_rule(["198.51.100.4"]), second, probe_rule())
     app, waf, _comments = engine(FakeWaf(document))
     result = app.execute(incident("203.0.113.5"), config(auto_block_enabled=True))
-    assert result.status == "blocked"
+    assert result.status == "approved"
     assert result.written_rule == "SentinelAutoBlock"
     by_name = {rule["name"]: rule for rule in waf.puts[0]["properties"]["customRules"]}
     assert by_name["SentinelAutoBlock"]["matchConditions"][0]["matchValues"] == [
@@ -344,7 +344,7 @@ def test_manual_add_stores_a_canonical_cidr_on_one_rule() -> None:
     document = agw_policy(probe_rule(), agw_block_rule(["198.51.100.4"]))
     app, waf, comments = engine(FakeWaf(document))
     result = app.add_entry("203.0.113.5/24", config(auto_block_enabled=True))
-    assert result.status == "blocked"
+    assert result.status == "approved"
     assert result.changed is True
     assert result.new_addresses == ("203.0.113.0/24",)
     assert result.written_rule == "SentinelAutoBlock"
@@ -397,7 +397,7 @@ def test_manual_remove_of_a_missing_address_does_not_put() -> None:
 def test_manual_remove_dry_run_does_not_put() -> None:
     app, waf, _comments = engine(FakeWaf(agw_policy(agw_block_rule(["203.0.113.5"]))))
     result = app.remove_entry("203.0.113.5", config())
-    assert result.status == "dry-run"
+    assert result.status == "awaiting-approval"
     assert result.new_addresses == ("203.0.113.5",)
     assert waf.puts == []
 
@@ -405,7 +405,7 @@ def test_manual_remove_dry_run_does_not_put() -> None:
 def test_front_door_put_uses_negate_condition_and_sku() -> None:
     app, waf, _comments = engine(FakeWaf(front_door_policy(probe_rule())))
     result = app.execute(incident("203.0.113.5"), front_door(auto_block_enabled=True))
-    assert result.status == "blocked"
+    assert result.status == "approved"
     body = waf.puts[0]
     assert "sku" in body
     condition = body["properties"]["customRules"]["rules"][0]["matchConditions"][0]

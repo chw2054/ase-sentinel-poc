@@ -17,7 +17,7 @@
         "id": "decision",
         "label": "Playbook and app",
         "focus": ["sentinel", "playbook", "web", "approver"],
-        "note": "The Logic App posts the incident. Approval chooses dry-run or enforce."
+        "note": "The Logic App posts the incident. Approval chooses awaiting-approval or approved."
       },
       {
         "id": "enforcement",
@@ -177,7 +177,7 @@
       "title": "Decide",
       "items": [
         "The playbook posts the same block API",
-        "AUTO_BLOCK stays false until enforce"
+        "AUTO_BLOCK_ENABLED stays false; approved enables one write"
       ]
     },
     {

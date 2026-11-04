@@ -8,10 +8,10 @@ from sentinel_waf_block.models import (
     APPLICATION_GATEWAY,
     MATCH_VALUES_PER_POLICY,
     STATUS_ALREADY_BLOCKED,
-    STATUS_BLOCKED,
+    STATUS_APPROVED,
     STATUS_CAPACITY,
     STATUS_COMMENT,
-    STATUS_DRY_RUN,
+    STATUS_AWAITING_APPROVAL,
     STATUS_GET,
     STATUS_NOTHING,
     STATUS_PROVIDER,
@@ -37,9 +37,9 @@ def render(result: Result, incident: Incident, config: Config) -> str:
     lines = _action_lines(result)
     if lines:
         parts.append("<p>" + "<br>".join(html.escape(line, quote=False) for line in lines) + "</p>")
-    if result.status in {STATUS_DRY_RUN, STATUS_BLOCKED, STATUS_COMMENT}:
+    if result.status in {STATUS_AWAITING_APPROVAL, STATUS_APPROVED, STATUS_COMMENT}:
         size = result.resulting_count if result.resulting_count is not None else 0
-        if result.status == STATUS_DRY_RUN:
+        if result.status == STATUS_AWAITING_APPROVAL:
             parts.append(
                 "<p>Provider: "
                 f"{provider}. Policy: {policy}. Custom rule that would be updated: {rule}. "
@@ -63,7 +63,7 @@ def render(result: Result, incident: Incident, config: Config) -> str:
             for item in result.rejected_addresses
         )
         parts.append(f"<p>Rejected:<br>{rejected}</p>")
-    if result.reason and result.status not in {STATUS_DRY_RUN, STATUS_BLOCKED, STATUS_COMMENT}:
+    if result.reason and result.status not in {STATUS_AWAITING_APPROVAL, STATUS_APPROVED, STATUS_COMMENT}:
         parts.append(f"<p>{html.escape(result.reason, quote=False)}</p>")
     if result.notify_error:
         parts.append(
@@ -83,16 +83,16 @@ def _headline(
     rule: str,
 ) -> str:
     status = result.status
-    if status == STATUS_DRY_RUN:
+    if status == STATUS_AWAITING_APPROVAL:
         return (
-            "<p><strong>ASE POC playbook dry-run.</strong> autoBlockEnabled is false. "
+            "<p><strong>Awaiting approval.</strong> "
             "The WAF policy was not changed. "
             f"Incident {number} ({title}).</p>"
         )
-    if status in {STATUS_BLOCKED, STATUS_COMMENT}:
+    if status in {STATUS_APPROVED, STATUS_COMMENT}:
         product = "Front Door" if config.waf_provider != APPLICATION_GATEWAY else "Application Gateway"
         return (
-            f"<p><strong>ASE POC playbook updated the {product} WAF policy.</strong> "
+            f"<p><strong>Approved.</strong> The {product} WAF policy was updated. "
             f"Incident {number} ({title}).</p>"
         )
     if status == STATUS_ALREADY_BLOCKED:
@@ -155,9 +155,9 @@ def _headline(
 
 
 def _action_lines(result: Result) -> list[str]:
-    if result.status == STATUS_DRY_RUN:
+    if result.status == STATUS_AWAITING_APPROVAL:
         return [f"Would block IP: {address}" for address in result.new_addresses]
-    if result.status in {STATUS_BLOCKED, STATUS_COMMENT}:
+    if result.status in {STATUS_APPROVED, STATUS_COMMENT}:
         return [f"Blocked IP: {address}" for address in result.new_addresses]
     return []
 

@@ -189,7 +189,7 @@
                       "incidentNumber": "@triggerBody()?['object']?['properties']?['incidentNumber']",
                       "incidentTitle": "@triggerBody()?['object']?['properties']?['title']",
                       "ipEntities": "@body('Select_IP_addresses')",
-                      "execution": "dry-run"
+                      "execution": "awaiting-approval"
                     },
                     "retryPolicy": {
                       "type": "none"
@@ -241,7 +241,7 @@
                       {
                         "equals": [
                           "@body('Call_block_function')?['status']",
-                          "dry-run"
+                          "awaiting-approval"
                         ]
                       },
                       {
@@ -318,7 +318,7 @@
                         ]
                       },
                       "actions": {
-                        "Call_block_function_-_enforce": {
+                        "Call_block_function_-_approved": {
                           "type": "Http",
                           "inputs": {
                             "uri": "@parameters('functionUrl')",
@@ -332,7 +332,7 @@
                               "incidentNumber": "@triggerBody()?['object']?['properties']?['incidentNumber']",
                               "incidentTitle": "@triggerBody()?['object']?['properties']?['title']",
                               "ipEntities": "@body('Select_IP_addresses')",
-                              "execution": "enforce"
+                              "execution": "approved"
                             },
                             "retryPolicy": {
                               "type": "none"
@@ -344,7 +344,7 @@
                           "operationOptions": "DisableAsyncPattern",
                           "runAfter": {}
                         },
-                        "Add_comment_-_enforce_call_failed": {
+                        "Add_comment_-_approved_call_failed": {
                           "type": "ApiConnection",
                           "inputs": {
                             "body": {
@@ -360,7 +360,7 @@
                             "path": "/Incidents/Comment"
                           },
                           "runAfter": {
-                            "Call_block_function_-_enforce": [
+                            "Call_block_function_-_approved": [
                               "Failed",
                               "TimedOut"
                             ]

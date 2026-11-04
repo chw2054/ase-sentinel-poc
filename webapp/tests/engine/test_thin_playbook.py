@@ -26,7 +26,7 @@ def test_thin_playbook_forwards_one_post() -> None:
     assert call["inputs"]["retryPolicy"]["type"] == "none"
     assert call["limit"]["timeout"] == "PT2M"
     assert call["inputs"]["body"]["ipEntities"] == "@body('Select_IP_addresses')"
-    assert call["inputs"]["body"]["execution"] == "dry-run"
+    assert call["inputs"]["body"]["execution"] == "awaiting-approval"
     select = workflow["actions"]["Select_IP_addresses"]["inputs"]
     assert select["from"] == "@coalesce(body('Entities_-_Get_IPs')?['IPs'], json('[]'))"
     assert select["select"] == "@coalesce(item()?['Address'], '')"
@@ -63,8 +63,8 @@ def test_approval_flow_is_fail_closed() -> None:
         "approve",
     ]
 
-    enforce = _find(workflow["actions"], "Call_block_function_-_enforce")
-    assert enforce["inputs"]["body"]["execution"] == "enforce"
+    approved = _find(workflow["actions"], "Call_block_function_-_approved")
+    assert approved["inputs"]["body"]["execution"] == "approved"
 
     empty = _find(workflow["actions"], "Check_approver")
     assert "approver email is empty" in json.dumps(empty)

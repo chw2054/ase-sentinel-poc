@@ -4501,7 +4501,7 @@
       <p class="subtitle">A WAF probe becomes a Sentinel incident. The operations app writes one custom rule.</p>
     </div>
 
-    <script id="archify-guided-views-data" type="application/json">[{"id":"detection","label":"Probe to incident","focus":["probe","gateway","workspace","sentinel"],"note":"Three matching firewall events open one Sentinel incident."},{"id":"decision","label":"Playbook and app","focus":["sentinel","playbook","web","approver"],"note":"The Logic App posts the incident. Approval chooses dry-run or enforce."},{"id":"enforcement","label":"One rule write","focus":["web","gateway","operator"],"note":"The web app writes a single custom rule on the attached WAF policy."}]</script>
+    <script id="archify-guided-views-data" type="application/json">[{"id":"detection","label":"Probe to incident","focus":["probe","gateway","workspace","sentinel"],"note":"Three matching firewall events open one Sentinel incident."},{"id":"decision","label":"Playbook and app","focus":["sentinel","playbook","web","approver"],"note":"The Logic App posts the incident. Approval chooses awaiting-approval or approved."},{"id":"enforcement","label":"One rule write","focus":["web","gateway","operator"],"note":"The web app writes a single custom rule on the attached WAF policy."}]</script>
 
     <div class="guided-views no-print" id="guided-views" hidden aria-label="Guided diagram views">
       <button id="guided-view-prev" type="button" aria-label="Previous guided view" title="Previous guided view ([)">&#8592;</button>
@@ -4939,7 +4939,7 @@
         </div>
         <ul>
           <li>&bull; The playbook posts the same block API</li>
-          <li>&bull; AUTO_BLOCK stays false until enforce</li>
+          <li>&bull; AUTO_BLOCK_ENABLED stays false; approved enables one write</li>
         </ul>
       </div>
 

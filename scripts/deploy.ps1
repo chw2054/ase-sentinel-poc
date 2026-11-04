@@ -332,7 +332,7 @@ else {
 }
 Write-Host ''
 Write-Host 'The operations web app decides the block. AUTO_BLOCK_ENABLED on that app is not set by this script.'
-Write-Host 'A playbook call with execution=enforce writes for that call. execution=dry-run does not.'
+Write-Host 'A playbook call with execution=approved writes for that call. execution=awaiting-approval does not.'
 Write-Host 'Cleanup: ./scripts/cleanup.ps1 -ResourceGroupName' $ResourceGroupName
 Write-Host 'Incident latency is usually 10 to 15 minutes: ingestion plus the analytics schedule.'
 Write-Host 'The procedure is in docs/testing.md.'

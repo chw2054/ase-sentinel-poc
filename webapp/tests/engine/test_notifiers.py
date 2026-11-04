@@ -1,7 +1,7 @@
 import pytest
 
 from sentinel_waf_block.engine import Engine, NotifyError, WafPutError
-from sentinel_waf_block.models import STATUS_BLOCKED, STATUS_CAPACITY, Result
+from sentinel_waf_block.models import STATUS_APPROVED, STATUS_CAPACITY, Result
 from sentinel_waf_block.notifiers import (
     EVENT_BLOCKED,
     EVENT_CAPACITY,
@@ -63,7 +63,7 @@ class _Credential:
 def test_would_block_card_says_awaiting_approval() -> None:
     session = _Session()
     notifier = TeamsWorkflowNotifier(URL, session=session)
-    notifier.notify(EVENT_WOULD_BLOCK, Result(status="dry-run", new_addresses=("203.0.113.9",)))
+    notifier.notify(EVENT_WOULD_BLOCK, Result(status="awaiting-approval", new_addresses=("203.0.113.9",)))
     card = session.posts[0]["json"]["attachments"][0]["content"]
     facts = {item["title"]: item["value"] for item in card["body"][1]["facts"]}
     assert facts["Status"] == "awaiting-approval"
@@ -73,13 +73,13 @@ def test_would_block_card_says_awaiting_approval() -> None:
 def test_blocked_card_carries_the_new_addresses() -> None:
     session = _Session()
     notifier = TeamsWorkflowNotifier(URL, session=session)
-    result = Result(status=STATUS_BLOCKED, changed=True, new_addresses=("203.0.113.5",))
+    result = Result(status=STATUS_APPROVED, changed=True, new_addresses=("203.0.113.5",))
     notifier.notify(EVENT_BLOCKED, result)
     payload = session.posts[0]["json"]
     card = payload["attachments"][0]["content"]
     assert "blocked an IP" in card["body"][0]["text"]
     facts = {item["title"]: item["value"] for item in card["body"][1]["facts"]}
-    assert facts["Status"] == STATUS_BLOCKED
+    assert facts["Status"] == STATUS_APPROVED
     assert facts["New addresses"] == "203.0.113.5"
 
 
@@ -104,7 +104,7 @@ def test_url_and_exception_text_are_never_in_the_error() -> None:
     session = _Session(error=_Boom())
     notifier = TeamsWorkflowNotifier(URL.replace("example.invalid", "outlook.office365.com/webhook/secreturl"), session=session)
     with pytest.raises(NotifyError) as got:
-        notifier.notify(EVENT_BLOCKED, Result(status=STATUS_BLOCKED))
+        notifier.notify(EVENT_BLOCKED, Result(status=STATUS_APPROVED))
     assert "secreturl" not in str(got.value)
     assert "notify failed" in str(got.value)
 
@@ -116,7 +116,7 @@ def test_timeout_names_the_failure_without_the_url() -> None:
     session = _Session(error=ConnectTimeout("slow"))
     notifier = TeamsWorkflowNotifier(URL, session=session)
     with pytest.raises(NotifyError) as got:
-        notifier.notify(EVENT_BLOCKED, Result(status=STATUS_BLOCKED))
+        notifier.notify(EVENT_BLOCKED, Result(status=STATUS_APPROVED))
     assert "timed out" in str(got.value)
     assert URL not in str(got.value)
 
@@ -125,7 +125,7 @@ def test_http_failure_carries_the_status_only() -> None:
     session = _Session(response=_Response(400))
     notifier = TeamsWorkflowNotifier(URL, session=session)
     with pytest.raises(NotifyError) as got:
-        notifier.notify(EVENT_BLOCKED, Result(status=STATUS_BLOCKED))
+        notifier.notify(EVENT_BLOCKED, Result(status=STATUS_APPROVED))
     assert str(got.value) == "notify failed with HTTP 400"
 
 
@@ -145,7 +145,7 @@ def test_entra_scope_adds_the_bearer_header() -> None:
     session = _Session()
     credential = _Credential()
     notifier = TeamsWorkflowNotifier(URL, session=session, auth_scope=FLOW_AUDIENCE, credential=credential)
-    notifier.notify(EVENT_BLOCKED, Result(status=STATUS_BLOCKED))
+    notifier.notify(EVENT_BLOCKED, Result(status=STATUS_APPROVED))
     assert credential.scopes == [FLOW_AUDIENCE]
     assert session.posts[0]["headers"]["Authorization"] == "Bearer test-mi-token"
 
@@ -159,7 +159,7 @@ def test_credential_failure_does_not_leak_the_token() -> None:
 
     notifier = TeamsWorkflowNotifier(URL, session=session, auth_scope=FLOW_AUDIENCE, credential=_Credential(error=_Boom()))
     with pytest.raises(NotifyError) as got:
-        notifier.notify(EVENT_BLOCKED, Result(status=STATUS_BLOCKED))
+        notifier.notify(EVENT_BLOCKED, Result(status=STATUS_APPROVED))
     assert "test-mi-token" not in str(got.value)
     assert "authentication failed" in str(got.value)
     assert session.posts == []
@@ -168,7 +168,7 @@ def test_credential_failure_does_not_leak_the_token() -> None:
 def test_no_scope_sends_no_auth_header() -> None:
     session = _Session()
     notifier = TeamsWorkflowNotifier(URL, session=session)
-    notifier.notify(EVENT_BLOCKED, Result(status=STATUS_BLOCKED))
+    notifier.notify(EVENT_BLOCKED, Result(status=STATUS_APPROVED))
     assert "Authorization" not in session.posts[0]["headers"]
 
 
@@ -176,7 +176,7 @@ def test_engine_notifies_blocked_and_survives_notify_failure() -> None:
     notifier = FakeNotifier(error=NotifyError("notify failed"))
     app = Engine(FakeWaf(agw_policy(probe_rule())), None, notifier)
     result = app.execute(incident("203.0.113.5"), config(auto_block_enabled=True))
-    assert result.status == "blocked"
+    assert result.status == "approved"
     assert result.changed is True
     assert result.notify_error == "notify failed"
     assert [event for event, _result in notifier.calls] == ["blocked"]
@@ -187,7 +187,7 @@ def test_engine_dry_run_notifies_would_block() -> None:
     notifier = FakeNotifier()
     app = Engine(FakeWaf(), None, notifier)
     result = app.execute(incident("203.0.113.5"), config())
-    assert result.status == "dry-run"
+    assert result.status == "awaiting-approval"
     assert [event for event, _result in notifier.calls] == ["would_block"]
     assert result.notify_error == ""
 
@@ -197,7 +197,7 @@ def test_engine_does_not_notify_when_would_block_is_filtered_out() -> None:
     app = Engine(FakeWaf(), None, notifier)
     app._notifier = None
     result = app.execute(incident("203.0.113.5"), config())
-    assert result.status == "dry-run"
+    assert result.status == "awaiting-approval"
 
 
 def test_engine_notifies_put_failure_and_keeps_the_status() -> None:

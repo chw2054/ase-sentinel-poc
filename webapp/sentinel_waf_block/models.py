@@ -13,8 +13,8 @@ PROVIDERS = frozenset({APPLICATION_GATEWAY, FRONT_DOOR})
 MATCH_VALUES_PER_POLICY = 600
 BLOCK_POLICY_TAG = "ase-sentinel-block-list"
 
-STATUS_DRY_RUN = "dry-run"
-STATUS_BLOCKED = "blocked"
+STATUS_AWAITING_APPROVAL = "awaiting-approval"
+STATUS_APPROVED = "approved"
 STATUS_ALREADY_BLOCKED = "already-blocked"
 STATUS_REMOVED = "removed"
 STATUS_NOT_LISTED = "not-listed"
@@ -38,9 +38,9 @@ class Incident:
     number: str
     title: str
     ip_entities: tuple[str, ...]
-    # "" lets the deployed setting decide; "dry-run" never PUTs; "enforce"
-    # PUTs on this request only, which is how the playbook acts on an
-    # approved Teams card. The engine still re-validates every address.
+    # "" lets the deployed setting decide. "awaiting-approval" never PUTs.
+    # "approved" PUTs on this request only, which is how the playbook acts
+    # after the approver chooses Approve. The engine still re-validates every address.
     execution: str = ""
 
 
@@ -137,8 +137,8 @@ def incident_from_payload(payload: object) -> Incident:
     if not isinstance(entities, list) or any(not isinstance(item, str) for item in entities):
         raise InputError("ipEntities must be an array of strings")
     execution = payload.get("execution", "")
-    if execution not in ("", "dry-run", "enforce"):
-        raise InputError("execution must be \"dry-run\" or \"enforce\"")
+    if execution not in ("", "awaiting-approval", "approved"):
+        raise InputError('execution must be "awaiting-approval" or "approved"')
     return Incident(
         arm_id=arm_id,
         number=str(number),
@@ -164,6 +164,6 @@ def manual_from_payload(payload: object) -> tuple[str, str, str] | None:
     if not isinstance(address, str):
         raise InputError("address must be a string")
     execution = payload.get("execution", "")
-    if execution not in ("", "dry-run", "enforce"):
-        raise InputError('execution must be "dry-run" or "enforce"')
+    if execution not in ("", "awaiting-approval", "approved"):
+        raise InputError('execution must be "awaiting-approval" or "approved"')
     return operation, address, execution

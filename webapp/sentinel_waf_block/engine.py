@@ -21,10 +21,10 @@ from sentinel_waf_block.decision import (
 from sentinel_waf_block.models import (
     PROVIDERS,
     STATUS_ALREADY_BLOCKED,
-    STATUS_BLOCKED,
+    STATUS_APPROVED,
     STATUS_CAPACITY,
     STATUS_COMMENT,
-    STATUS_DRY_RUN,
+    STATUS_AWAITING_APPROVAL,
     STATUS_GET,
     STATUS_NOT_LISTED,
     STATUS_NOTHING,
@@ -180,7 +180,7 @@ class Engine:
                 reason=f"no block list can take {parsed.canonical}",
             )
         base = _result(
-            STATUS_DRY_RUN,
+            STATUS_AWAITING_APPROVAL,
             candidate_addresses=(parsed.canonical,),
             new_addresses=target.added,
             existing_count=len(target.merged) - len(target.added),
@@ -191,7 +191,7 @@ class Engine:
         )
         if not enforcement_enabled(config.auto_block_enabled):
             return base
-        return self._put(config, view, target, base, STATUS_BLOCKED)
+        return self._put(config, view, target, base, STATUS_APPROVED)
 
     def remove_entry(self, raw: str, config: Config) -> Result:
         """Remove one stored host or CIDR. An emptied rule is dropped, not left blank."""
@@ -220,7 +220,7 @@ class Engine:
         remaining = tuple(value for value in block.values if value != stored)
         target = RuleTarget(block.name, block.priority, remaining, (stored,), False)
         base = _result(
-            STATUS_DRY_RUN,
+            STATUS_AWAITING_APPROVAL,
             candidate_addresses=(stored,),
             new_addresses=(stored,),
             existing_count=len(block.values),
@@ -342,7 +342,7 @@ class Engine:
                 ),
             )
         base = _result(
-            STATUS_DRY_RUN,
+            STATUS_AWAITING_APPROVAL,
             candidate_addresses=tuple(enforceable),
             new_addresses=target.added,
             rejected_addresses=rejections,
@@ -361,7 +361,7 @@ class Engine:
             return replace(base, status=STATUS_PUT, changed=False, reason="authentication failed")
         except WafPutError as exc:
             return replace(base, status=STATUS_PUT, changed=False, reason=_safe_text(exc))
-        return replace(base, status=STATUS_BLOCKED, changed=True, reason="")
+        return replace(base, status=STATUS_APPROVED, changed=True, reason="")
 
     def _policy_view(self, config: Config, enforceable: list[str], rejections: tuple[Rejection, ...]):
         try:
@@ -397,7 +397,7 @@ class Engine:
             self._comments.write_comment(incident.arm_id, result.comment)
         except (CommentError, AuthenticationError) as exc:
             message = _safe_text(exc)
-            if result.status == STATUS_BLOCKED:
+            if result.status == STATUS_APPROVED:
                 return replace(result, status=STATUS_COMMENT, comment_error=message)
             return replace(result, comment_error=message)
         return result
@@ -419,15 +419,15 @@ class Engine:
 
 
 _NOTIFY_EVENTS = {
-    # blocked-comment-failed is still a completed PUT; the Teams card should
-    # say the block happened and mention the comment failure separately.
-    STATUS_BLOCKED: "blocked",
+    # blocked-comment-failed is still a completed PUT. The Teams event name
+    # stays "blocked" so NOTIFY_EVENTS keeps matching. The API status is approved.
+    STATUS_APPROVED: "blocked",
     STATUS_COMMENT: "blocked",
     STATUS_PUT: "put_failed",
     STATUS_CAPACITY: "capacity",
-    # The evaluation phase of the approval flow also notifies: the channel
-    # sees the proposal, the approver still gates the actual block.
-    STATUS_DRY_RUN: "would_block",
+    # The evaluation phase notifies before anyone approves. The event name
+    # stays "would_block". The API status is awaiting-approval.
+    STATUS_AWAITING_APPROVAL: "would_block",
 }
 
 
