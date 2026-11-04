@@ -63,7 +63,7 @@ ASE 希望用 Microsoft Sentinel 與 Azure 原生自動化，處理 Application 
 | FR-2 | 同一來源 IP 在觀察窗內達到門檻才開事件 | 已實作於 `sentinel/analytics-rules/simulated-probe.application-gateway.kql` 與 `infra/parameters/main.bicepparam`（門檻 3、頻率 5 分鐘、回看 30 分鐘）。線上規則內容本次未重讀 |
 | FR-3 | 只在事件 Created 時跑 playbook | 已實作於 `sentinel/automation-rules/block-malicious-ip.bicep`。線上自動化規則本次未重讀 |
 | FR-4 | 抽出 IP、拒絕私有與保留位址、先 dry-run | 已實作於 `webapp/sentinel_waf_block/`。作業 Web App 只有這條讀取路徑，playbook 呼叫該站點 |
-| FR-5 | Office 365 Approve 之後才 `execution=enforce` | 已實作於 `playbooks/block-malicious-ip/thin-workflow.json`。連線資源存在；本次未開啟一筆新的核准 |
+| FR-5 | Office 365 Approve 之後才 `execution=approved` | 已實作於 `playbooks/block-malicious-ip/thin-workflow.json`。連線資源存在；本次未開啟一筆新的核准。線上 Logic App 尚未換成這份定義 |
 | FR-6 | 寫入 `SentinelAutoBlock`，已存在的位址不重複寫 | 已實作。線上該規則為 IPMatch、priority 10、Enabled，match value 數量為 6 |
 | FR-7 | Teams 通知，卡片不是核准按鈕 | 已實作於 `webapp/sentinel_waf_block/notifiers.py`。線上有 `NOTIFY_TEAMS_AUTH=entra` 與 `NOTIFY_TEAMS_URL`（值不列入文件）。本次未驗證卡片是否送達 |
 | FR-8 | 作業頁面讀 Sentinel 與 WAF | 已實作於 `webapp/app/live.py`。站點 Running。本次未以瀏覽器登入驗證畫面 |
@@ -72,7 +72,7 @@ ASE 希望用 Microsoft Sentinel 與 Azure 原生自動化，處理 Application 
 
 | 編號 | 需求 | 實際作法 |
 | --- | --- | --- |
-| NFR-1 | 沒有核准就不改政策 | `AUTO_BLOCK_ENABLED` 必須是 JSON boolean `true` 才會 PUT。字串 `"true"` 不算。線上值為 `false`。Playbook 只在核准後送 `execution=enforce`，該欄位會把這一次請求的旗標改成 true |
+| NFR-1 | 沒有核准就不改政策 | `AUTO_BLOCK_ENABLED` 必須是 JSON boolean `true` 才會 PUT。字串 `"true"` 不算。線上值為 `false`。Playbook 只在核准後送 `execution=approved`，該欄位會把這一次請求的旗標改成 true |
 | NFR-2 | 失敗時可追溯 | Sentinel 事件註解由引擎撰寫。Logic App 在呼叫失敗或核准失敗時另外寫註解。註解要讀者自己看政策，不把 HTTP 失敗解讀成已封鎖 |
 | NFR-3 | 機密不進範本與日誌 | Teams URL、`x-functions-key`、App Insights 連線字串不寫進本文件。`azure_clients.py` 會把例外改寫後再拋出 |
 | NFR-4 | 可在另一座工廠重建 | 參數在 `scripts/deploy.ps1` 與 `infra/parameters/main.bicepparam`。線上 Web App 的部署不在這個腳本的成功路徑裡，見部署指南與落差報告 |
@@ -122,12 +122,12 @@ flowchart LR
   teams[Teams Workflows 通知]
   client --> agw --> waf
   waf --> law --> sen --> auto --> la
-  la -->|dry-run| app --> eng
+  la -->|awaiting-approval| app --> eng
   eng -->|註解| sen
   eng -->|would_block 卡片| teams
   la --> mail
   mail -->|Approve| la
-  la -->|execution=enforce| app
+  la -->|execution=approved| app
   eng -->|PUT 自訂規則| waf
 ```
 
@@ -162,10 +162,10 @@ flowchart LR
 3. 診斷設定預期寫入 `AGWFirewallLogs`。設定名稱在 `profiles/poc-approval.json` 為 `diag-waf-to-sentinel`。本次未重讀診斷設定。
 4. 分析規則彙總後開事件。分組 lookback 在 Bicep 為 `PT12H`，且 `reopenClosedIncident` 在設定檔的期望值是 false。
 5. 自動化規則把事件標成 `poc-simulated-probe` 並啟動 playbook。條件是相關分析規則 ID。
-6. Playbook 取 IP 實體，POST dry-run 到 Web App。
+6. Playbook 取 IP 實體，POST `execution=awaiting-approval` 到 Web App。
 7. 引擎驗證、讀政策、寫 Sentinel 註解、視事件類型送 Teams。
-8. 只有 dry-run 且 `new_addresses` 長度大於 0 才寄核准信。
-9. Approve 之後第二次 POST，`execution=enforce`，引擎 PUT 政策。
+8. 只有 `status` 是 `awaiting-approval` 且 `new_addresses` 長度大於 0 才寄核准信。
+9. Approve 之後第二次 POST，`execution=approved`，引擎 PUT 政策。
 
 ### 3.4 資料流
 
@@ -186,14 +186,14 @@ sequenceDiagram
   participant M as Office 365
   W->>S: 防火牆日誌
   S->>L: incident Created
-  L->>A: POST execution=dry-run
+  L->>A: POST execution=awaiting-approval
   A->>W: GET 政策
   A->>S: 註解 Would block 或其他狀態
   A-->>L: status 與 new_addresses
-  alt status 是 dry-run 且有新位址
+  alt status 是 awaiting-approval 且有新位址
     L->>M: 核准信 Approve, Reject
     alt 選擇 Approve
-      L->>A: POST execution=enforce
+      L->>A: POST execution=approved
       A->>W: PUT 政策
       A->>S: 已更新政策的註解
     else 未選 Approve
@@ -236,7 +236,7 @@ sequenceDiagram
 - Microsoft Learn 記載一個 WAF 政策最多 100 條自訂規則，IPMatch 只支援 IPv4，且 Match Variable 為 RemoteAddr。[Custom rules overview](https://learn.microsoft.com/en-us/azure/web-application-firewall/ag/custom-waf-rules-overview)
 - 每個 match condition 的 IP 範圍數量，Microsoft Q&A 引用服務限制：CRS 3.2 或更新為 600，CRS 3.1 或更早為 540。一條 CIDR 算一筆。這是產品限制說明，不是本次對這份政策的 CRS 版本查核。
 - 程式常數 `MATCH_VALUES_PER_POLICY = 600`、`MAX_CUSTOM_RULES = 100`（`webapp/sentinel_waf_block/models.py`、`waf_arm.py`）。
-- `MAXIMUM_BLOCK_ENTRIES` 線上值是 `100`。ARM 寫入路徑的 `select_block_list` 用 600 判斷一條規則是否還有空間，沒有用 `config.maximum_block_entries` 當上限。先前會執行 100 上限的 SQL/fixture 程式已移除，所以這條 PUT 路徑目前沒有 100 的檢查。
+- `select_block_list` 用 600 判斷一條規則是否還有空間。滿了就在同一政策建立下一條 `SentinelAutoBlock-<n>`。新的一批本身超過 600、自訂規則已達 100，或 priority 1–100 已滿時回 `capacity-exceeded`，不 PUT。`MAXIMUM_BLOCK_ENTRIES` 已從程式與 App Settings 移除。
 
 ### 4.2 Log Analytics 與 Sentinel 分析規則
 
@@ -262,7 +262,7 @@ sequenceDiagram
 - 頂層動作：`Entities_-_Get_IPs`、`Add_comment_-_entities_failed`、`Terminate_-_entities_failed`、`Select_IP_addresses`、`Check_function_url`。核准與第二次呼叫巢狀在條件內。
 - 輸入：Sentinel incident 觸發內容。輸出：兩次以內的 HTTP POST，以及 Sentinel 註解。
 - HTTP：方法 POST，標頭 `x-functions-key`，`retryPolicy` 為 none，逾時 `PT2M`，`DisableAsyncPattern`。
-- 核准：`Start_and_wait_for_an_approval`，選項 `Approve, Reject`。`SelectedOption` 以小寫比較，只有 `approve` 會送 `execution=enforce`。
+- 核准：`Start_and_wait_for_an_approval`，選項 `Approve, Reject`。`SelectedOption` 以小寫比較，只有 `approve` 會送 `execution=approved`。
 - 空的 `approverEmail`：寫註解後以 Succeeded 結束，不呼叫引擎。
 - 相關檔案：`playbooks/block-malicious-ip/thin-workflow.json`、`playbooks/block-malicious-ip/README.md`、`infra/modules/playbook.bicep`。
 
@@ -276,7 +276,7 @@ sequenceDiagram
 - 處理：
   1. 手動呼叫帶 `operation` 為 `add` 或 `remove` 時，走 `add_entry` 或 `remove_entry`，不寫事件註解。
   2. 否則把本文解析成 `Incident`。
-  3. `execution=enforce` 把 `auto_block_enabled` 設為 true。`execution=dry-run` 設為 false。省略則用環境設定。
+  3. `execution=approved` 把 `auto_block_enabled` 設為 true。`execution=awaiting-approval` 設為 false。省略則用環境設定。`dry-run` 與 `enforce` 回 HTTP 400。
   4. `enforcement_enabled` 只接受 Python boolean `True`。
 - 依賴：ARM `https://management.azure.com`，範圍 `https://management.azure.com/.default`。GET 讀取逾時 20 秒、最多 3 次，只對逾時重試。PUT 逾時預設 120 秒、不重試。HTTP 202 視為失敗，呼叫端必須先讀政策再決定要不要重做。
 - 設定：見第 6 章。缺 `WAF_POLICY_RESOURCE_ID` 或 `WAF_PROVIDER` 時，`config_from_env` 丟出 `ConfigError`，HTTP 500，`status=validation-failed`。
@@ -294,7 +294,7 @@ sequenceDiagram
 
 - `TeamsWorkflowNotifier` 對 `https://` 的 Workflows URL 送 Adaptive Card。
 - `NOTIFY_TEAMS_AUTH=entra` 時，對 `https://service.flow.microsoft.com/` 取受控識別權杖。此 audience 必須完全相符，含結尾斜線。官方說明：[OAuth authentication for Power Automate](https://learn.microsoft.com/en-us/power-automate/oauth-authentication)。
-- 乾跑事件的 HTTP `status` 仍是 `dry-run`。卡片 Fact 的 Status 顯示 `awaiting-approval`（`notifiers.py` 的 `_CARD_STATUS`）。Playbook 依 HTTP `status == dry-run` 決定要不要核准，不讀卡片文字。
+- 尚未寫入時，HTTP `status` 是 `awaiting-approval`。卡片 Fact 的 Status 也是 `awaiting-approval`。Playbook 依 HTTP `status == awaiting-approval` 且 `new_addresses` 有值才寄核准信，不讀卡片文字。寫入成功的 HTTP `status` 是 `approved`。Teams 事件名稱仍是 `would_block` 與 `blocked`，用來對上 `NOTIFY_EVENTS`。
 - 線上 `NOTIFY_EVENTS=would_block,blocked,put_failed,capacity`。
 - 通知失敗會回到結果的 `notify_error`，並可寫進 Sentinel 註解。通知失敗本身不會把 `changed` 設成 true。
 
@@ -327,19 +327,19 @@ SQL 頁面、SQLAlchemy 與記憶體 WAF fixture 已從 `webapp/app/` 移除。�
 
 | 條件 | `status` | 是否 PUT | Playbook 下一步 |
 | --- | --- | --- | --- |
-| `execution` 不是空字串、`dry-run`、`enforce` | HTTP 400，`validation-failed` | 否 | 呼叫失敗分支，不假設已封鎖 |
+| `execution` 不是空字串、`awaiting-approval`、`approved` | HTTP 400，`validation-failed` | 否 | 呼叫失敗分支，不假設已封鎖 |
 | 沒有可執行位址 | `nothing-to-block` | 否，且可能尚未讀政策 | 不進入核准 |
 | 保護範圍有無法比較的項目 | `protected-ranges-invalid` | 否 | 不進入核准 |
 | 讀政策失敗或資源 ID 不是 ARM id | `waf-get-failed` | 否 | 不進入核准 |
 | 政策形狀不符 | `policy-shape-invalid` | 否 | 不進入核准 |
 | 位址都已在封鎖規則 | `already-blocked` | 否 | 不進入核准 |
 | 規則已滿且不能再新增自訂規則 | `capacity-exceeded` | 否 | 不進入核准 |
-| 有新位址且這次不強制執行 | `dry-run` | 否 | 若 `new_addresses` 非空，寄核准信 |
-| 有新位址且 `execution=enforce` 或設定為 JSON true | `blocked`，`changed=true` | 是 | 第二次呼叫的結果由引擎寫註解 |
+| 有新位址且這次不寫入 | `awaiting-approval` | 否 | 若 `new_addresses` 非空，寄核准信 |
+| 有新位址且 `execution=approved` 或設定為 JSON true | `approved`，`changed=true` | 是 | 第二次呼叫的結果由引擎寫註解 |
 | PUT 失敗或只得到 202 | `waf-put-failed`，`changed=false` | 不把失敗當成已寫入 | 核准後的失敗註解要讀者去讀政策 |
 | 未處理例外 | HTTP 500，`internal-error` | 未知，必須讀政策 | 呼叫失敗分支 |
 
-核准信只在第一次回應同時滿足 `status == dry-run` 且 `new_addresses` 長度大於 0 時發出。`already-blocked`、`nothing-to-block`、`capacity-exceeded` 都不會寄信。
+核准信只在第一次回應同時滿足 `status == awaiting-approval` 且 `new_addresses` 長度大於 0 時發出。`already-blocked`、`nothing-to-block`、`capacity-exceeded` 都不會寄信。
 
 ### 5.2 IP 擷取與驗證
 
@@ -383,11 +383,11 @@ Playbook 的 `Select_IP_addresses` 把實體動作選出的位址放進 `ipEntit
   "incidentNumber": 1,
   "incidentTitle": "ASE POC - simulated WAF probe",
   "ipEntities": ["203.0.113.10"],
-  "execution": "dry-run"
+  "execution": "awaiting-approval"
 }
 ```
 
-`incidentNumber` 可為整數或沒有前後空白的字串。`incidentArmId` 必須以 `/` 開頭。`execution` 可省略。
+`incidentNumber` 可為整數或沒有前後空白的字串。`incidentArmId` 必須以 `/` 開頭。`execution` 可省略。合法值是 `awaiting-approval` 與 `approved`。
 
 手動本文：
 
@@ -395,11 +395,11 @@ Playbook 的 `Select_IP_addresses` 把實體動作選出的位址放進 `ipEntit
 {
   "operation": "add",
   "address": "203.0.113.0/24",
-  "execution": "dry-run"
+  "execution": "approved"
 }
 ```
 
-`operation` 只允許 `add` 或 `remove`。範例位址是文件用例，不是線上名單。
+`operation` 只允許 `add` 或 `remove`。作業頁面的手動新增與移除送 `approved`。範例位址是文件用例，不是線上名單。
 
 成功時 HTTP 200，主體為 `Result.to_dict`。驗證失敗 HTTP 400。設定錯誤或未處理例外 HTTP 500。
 
@@ -410,14 +410,14 @@ Playbook 的 `Select_IP_addresses` 把實體動作選出的位址放進 `ipEntit
 | 名稱 | 線上值或狀態 | 用途 | 機密 |
 | --- | --- | --- | --- |
 | `APP_ENV` | `production` | 區分本機與正式檢查 | 否 |
-| `LIVE_AZURE` | 線上仍是 `true` | 儲存庫已不讀這個旗標。目前部署的程式仍會讀它，所以設定先留著。新程式發布後才能刪除 | 否 |
+| `LIVE_AZURE` | 2026-11-04 已從 App Settings 刪除 | 程式不讀。刪除後重啟，`GET /health` 仍回 200 | 否 |
 | `AUTO_BLOCK_ENABLED` | `false` | 省略 `execution` 時不 PUT | 否 |
 | `OVERRIDE_PROTECTED_RANGES` | `false` | 不略過保護範圍 | 否 |
 | `WAF_PROVIDER` | `ApplicationGateway` | 政策形狀 | 否 |
 | `BLOCK_RULE_NAME` | `SentinelAutoBlock` | 封鎖規則基底名稱 | 否 |
 | `BLOCK_RULE_PRIORITY` | `10` | 新基底規則的 priority | 否 |
-| `MAXIMUM_BLOCK_ENTRIES` | `100` | 設定有讀入。ARM 路徑的單規則上限仍是 600 | 否 |
-| `REQUIRE_APPROVAL` | `true` | 頁面設定。Playbook 的核准不讀這個旗標 | 否 |
+| `MAXIMUM_BLOCK_ENTRIES` | 2026-11-04 已從 App Settings 刪除 | 程式不讀。單規則容量是常數 600 | 否 |
+| `REQUIRE_APPROVAL` | 2026-11-04 已從 App Settings 刪除 | 程式不讀。核准在 playbook | 否 |
 | `SEED_FIXTURE` | 2026-11-02 已從 App Settings 刪除 | 程式不再讀這個旗標 | 否 |
 | `NOTIFY_TEAMS_AUTH` | `entra` | Teams 使用受控識別權杖 | 否 |
 | `NOTIFY_EVENTS` | `would_block,blocked,put_failed,capacity` | 要送出的事件 | 否 |
@@ -427,9 +427,11 @@ Playbook 的 `Select_IP_addresses` 把實體動作選出的位址放進 `ipEntit
 | `AZURE_SUBSCRIPTION_ID` | 已設定 | live 模式必要 | 否，值即本 POC 訂用帳戶 |
 | `BLOCK_API_KEY` | 已設定 | playbook 共用祕密 | 是 |
 | `NOTIFY_TEAMS_URL` | 已設定 | Workflows 觸發 URL | 是 |
-| `APP_SECRET`、`INTEGRATION_API_KEY`、`MICROSOFT_PROVIDER_AUTHENTICATION_SECRET` | 已設定 | 應用與 Easy Auth | 是 |
+| `APP_SECRET`、`MICROSOFT_PROVIDER_AUTHENTICATION_SECRET` | 已設定 | 應用與 Easy Auth | 是 |
+| `INTEGRATION_API_KEY` | 2026-11-04 的名稱清單裡沒有 | 程式不讀 | 是 |
 | `PROTECTED_IP_RANGES` | 已設定 | 額外保護範圍 | 內容可能是客戶網路，不摘錄 |
-| `APPROVER_EMAIL`、`POC_ADMIN_USERS`、`PUBLIC_BASE_URL` | 已設定 | 核准人與頁面 | 不摘錄 |
+| `POC_ADMIN_USERS` | 已設定 | 作業頁面角色 | 不摘錄 |
+| `APPROVER_EMAIL`、`PUBLIC_BASE_URL` | 2026-11-04 已從 App Settings 刪除 | 程式不讀。核准信箱只在 playbook 參數 `approverEmail` | 不摘錄 |
 | `ARM_API_VERSION`、`BLOCK_POLICY_TAG` | 已設定 | ARM 版本與標籤名 | 本次未摘錄值。程式預設 API 版本在 Application Gateway 為 `2024-05-01`，標籤預設 `ase-sentinel-block-list` |
 | `WEBSITES_PORT` | 已設定 | 網站連接埠。啟動命令綁定 `8000` | 否 |
 | `SCM_DO_BUILD_DURING_DEPLOYMENT`、`WEBSITE_VNET_ROUTE_ALL`、`WEBSITE_HTTPLOGGING_RETENTION_DAYS` | 已設定 | 平台 | 否 |
@@ -438,7 +440,7 @@ Playbook 的 `Select_IP_addresses` 把實體動作選出的位址放進 `ipEntit
 
 ### 6.3 註解文字
 
-`comments.py` 依狀態產生 HTML 註解。dry-run 的動作行是 `Would block IP: <address>`。已封鎖時標題說明位址已在指定自訂規則上，政策沒有再寫一次。PUT 失敗時明確寫「不要假設該位址已封鎖」。
+`comments.py` 依狀態產生 HTML 註解。`awaiting-approval` 的標題是 Awaiting approval，動作行是 `Would block IP: <address>`。`approved` 的標題是 Approved。已在名單上時標題說明位址已在指定自訂規則上，政策沒有再寫一次。PUT 失敗時明確寫「不要假設該位址已封鎖」。
 
 ## 7. Security Design
 
@@ -458,7 +460,7 @@ Playbook 本身不應擁有 WAF 寫入權。`deploy.ps1` 有 `Remove-PlaybookNet
 
 能改政策的人是收到 Office 365 核准信、且選擇 Approve 的帳戶。Teams 卡片沒有核准動作。`POC_ADMIN_USERS` 影響作業頁面角色，不取代核准信。
 
-頁面上的手動 `add` 或 `remove` 若帶 `execution=enforce`，會在同一次請求把引擎旗標打開。這是程式行為（`service.py` 註解寫明作業應用程式會為手動編輯送出 enforce）。它與 playbook 的核准是兩條授權路徑。上線前必須確認頁面路由有 Entra 登入，且不是匿名可呼叫。
+頁面上的手動 `add` 或 `remove` 帶 `execution=approved`，會在同一次請求把引擎旗標打開。這是程式行為（`service.py`）。它與 playbook 的核准是兩條授權路徑。上線前必須確認頁面路由有 Entra 登入，且不是匿名可呼叫。
 
 ### 7.3 祕密
 
@@ -492,7 +494,7 @@ Playbook 本身不應擁有 WAF 寫入權。`deploy.ps1` 有 `Remove-PlaybookNet
 ### 8.2 未實作或僅為建議
 
 - 沒有跨執行的樂觀鎖定或 ETag 檢查。建議在正式環境比對 PUT 前的政策版本。
-- `MAXIMUM_BLOCK_ENTRIES=100` 沒有套用在 ARM 引擎。若 ASE 要把產品上限定在 100，必須改引擎或在核准前檢查，不能只靠這個 App Setting。
+- 沒有另外的 100 筆產品上限。若 ASE 要加一個比 600 更小的上限，必須改引擎。App Setting 已經沒有這個開關。
 - 沒有封鎖到期、自動解除、或變更單編號。
 - 沒有針對 playbook 失敗或容量拒絕的 Azure Monitor 警示規則。本次資源清單沒有這類警示，只有 Application Insights Smart Detection 動作群組。
 - 第二份政策沒有被引擎納入寫入集合。若將來要多政策同步，現況還沒有這條行為。
@@ -500,9 +502,9 @@ Playbook 本身不應擁有 WAF 寫入權。`deploy.ps1` 有 `Remove-PlaybookNet
 ### 8.3 回復程序
 
 1. 停用自動化規則，或停用 Logic App，讓新事件不再呼叫引擎。Bicep 的自動化規則有 `enabled` 參數。線上停用步驟見部署指南，本次沒有執行。
-2. 保持 `AUTO_BLOCK_ENABLED=false`。不要對現有 playbook 送 `execution=enforce`。
+2. 保持 `AUTO_BLOCK_ENABLED=false`。不要對現有 playbook 送 `execution=approved`，除非這次呼叫就是要寫入。
 3. 讀 `wafpol-ase-sentinel-poc` 的 `SentinelAutoBlock.matchValues`，移除不應存在的位址後 PUT 完整政策。不要 PUT 空陣列。若名單會變空，刪除該規則。`README.md` 有相同警告。
-4. 讀 Sentinel 註解與 Logic App run，確認哪一次是 dry-run、哪一次是 enforce。
+4. 讀 Sentinel 註解與 Logic App run，確認哪一次是 `awaiting-approval`、哪一次是 `approved`。
 
 ## 9. 限制、風險與後續
 

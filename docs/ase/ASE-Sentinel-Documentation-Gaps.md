@@ -41,9 +41,9 @@
 
 | ID | 優先順序 | 元件 | 說明 | 建議動作 | 來源 |
 | --- | --- | --- | --- | --- | --- |
-| G-19 | P1 | 兩條授權路徑 | Playbook 要等 Office 365 Approve。`service.py` 允許作業應用程式對手動 add 或 remove 送 `execution=enforce`，從而在該次請求打開 PUT | 確認只有已登入的操作者打得到手動路由。文件與介面要寫明手動維護不經過核准信 | `webapp/sentinel_waf_block/service.py`；`webapp/app/live.py` |
+| G-19 | P1 | 兩條授權路徑 | Playbook 要等 Office 365 Approve。`service.py` 允許作業應用程式對手動 add 或 remove 送 `execution=approved`，從而在該次請求打開 PUT | 確認只有已登入的操作者打得到手動路由。文件與介面要寫明手動維護不經過核准信 | `webapp/sentinel_waf_block/service.py`；`webapp/app/live.py` |
 | G-20 | P1 | 祕密存放 | `BLOCK_API_KEY`、Teams URL、Easy Auth 祕密是 App Settings，不是 Key Vault 參考 | 決定正式環境是否改為 Key Vault reference，以及金鑰輪替時如何更新 playbook 的 `functionKey` 而不重布整份定義 | Web App 設定名稱 |
-| G-21 | P2 | 核准人身分 | 程式預設郵件為 `admin@mngenvmcap591832.onmicrosoft.com`。線上 `APPROVER_EMAIL` 未在文件摘錄，避免把未核對的個人資料寫死 | 核對 playbook 參數與 App Setting 是否同一人，並指定代理人 | `webapp/app/config.py`；`infra/modules/playbook.bicep` |
+| G-21 | P2 | 核准人身分 | 核准信箱只在 playbook 參數 `approverEmail`。Web App 不再有 `APPROVER_EMAIL`。文件預設郵件為 `admin@mngenvmcap591832.onmicrosoft.com`，本次沒有重讀參數值 | 核對 playbook 參數是否仍是這個人，並指定代理人 | `infra/modules/playbook.bicep` |
 | G-22 | P2 | 頁面角色 | `POC_ADMIN_USERS` 已設定。live 頁面如何把 Easy Auth 對應到可按封鎖的角色，本次沒有逐行對到測試證據 | 補一節權限矩陣：誰可看事件、誰可手動增刪 | `webapp/app/config.py` |
 | G-23 | P2 | 模擬探測打到測試閘道 | 探測來源就是操作者的出口 IP。核准後該 IP 會進入封鎖規則 | 向客戶說明這不是攻擊者 IP。正式閘道禁止用個人出口做 Approve 演練 | `scripts/test.ps1`；分析規則 KQL |
 
@@ -54,7 +54,7 @@
 | G-24 | P1 | 端到端 | 本次沒有發送探測、沒有 Reject、沒有 Approve、沒有重跑 pytest。資源存在不能當成測試通過 | 在維護視窗做一筆 Reject，比對 match value 數量不變。Approve 只在客戶同意使用測試 IP 時進行，並事先寫好移除步驟 | 部署指南第 6 章 |
 | G-25 | P2 | 單元測試 | `webapp/tests/engine/` 與 `webapp/tests/test_live.py`、`test_playbook.py` 覆蓋位址、執行旗標、playbook 條件與 live 路由。結果沒有在這次文件工作中產生 | 交接前記下指令與通過數量。未跑之前，文件不引用通過次數 | `webapp/tests/` |
 | G-26 | P2 | 延伸規則與分析規則 | KQL 只排除名稱完全等於 `SentinelAutoBlock` 的列。`SentinelAutoBlock-2` 的阻擋可能再被計入。線上尚無延伸規則，所以這不是已觀察到的事件 | 用測試政策驗證，或把排除條件改成規則名稱起始於基底名稱。這是程式變更，不在本次文件範圍執行 | `simulated-probe.application-gateway.kql`；`waf_arm.py` 的 `_is_block_list_name` |
-| G-27 | P2 | 100 筆產品上限 | `MAXIMUM_BLOCK_ENTRIES=100` 已設定。`select_block_list` 用 600 與自訂規則數 100 判斷，沒有用 `maximum_block_entries`。會執行 100 上限的 SQL/fixture 程式已移除 | 補測試證明超過 100 時 live PUT 會拒絕，或修改文件與設定，改口說平台上限是 600。現況兩者不要同時講成已生效 | `decision.py`；`waf_arm.py` |
+| G-27 | P2 | 單規則容量 | 未使用的 `MAXIMUM_BLOCK_ENTRIES` 已從程式、部署參數與 App Settings 移除。`select_block_list` 以 600 個 match value 為一條規則的上限，滿了就在同一政策開下一條規則。新的一批超過 600、自訂規則已達 100，或 priority 1–100 已滿時回 `capacity-exceeded` 且不 PUT | 若要更小的產品上限，必須另外加檢查。現在沒有 100 的開關 | `waf_arm.py` |
 | G-28 | P3 | 並行 PUT | 沒有 ETag 或鎖。兩個 run 可能覆蓋 | 用兩個重疊的 dry-run 無法測出，必須在測試訂用帳戶做可控的並行 enforce | `engine.py` 的 `_decide` |
 
 ## 6. POC 到正式環境的落差
@@ -75,19 +75,19 @@
 | G-35 | P1 | 使用現有 Application Gateway 政策，還是新建測試閘道？ | 腳本預設 `DeployTestWaf=true` 會建立測試政策。對正式政策執行現有腳本不安全 | `scripts/deploy.ps1` |
 | G-36 | P1 | 核准人信箱與是否允許代理人 | 空信箱會讓 playbook 在評估前停止。這是安全的失敗，但也表示流程不會跑完 | `thin-workflow.json` |
 | G-37 | P1 | 能否在該工廠的閘道上送 `ase-poc-probe` | 不能的話，整條分析規則都要改，不能只改 playbook | KQL 與 `scripts/test.ps1` |
-| G-38 | P1 | 產品上限要 100 還是平台的 600 | 現況設定與引擎不一致，複製後會繼續不一致 | G-27 |
+| G-38 | P1 | 是否要另設低於 600 的產品上限 | 殘留的 100 設定已移除。引擎就是每條規則 600，並可再開下一條自訂規則。現在沒有更小的開關 | G-27 |
 | G-39 | P2 | 客戶保護範圍有哪些，prefix 是否只使用 8、16、24、32 | 其他 prefix 會讓整次執行變成 `protected-ranges-invalid`，且不讀政策 | `addresses.py` |
 | G-40 | P2 | 12 小時分組是否可接受 | 窗內後續探測不會新開 playbook，也不會再寄核准信 | `sentinel.bicep` |
 | G-41 | P2 | Teams 通知是否為必要交付物，flow 由誰擁有 | URL 是祕密，且綁定單一 Power Automate 環境 | `notifiers.py` |
 | G-42 | P2 | 作業頁面要不要對第二座工廠的人員開放 | 頁面的手動 enforce 是另一條寫入路徑 | G-19 |
-| G-43 | P3 | SQL 作業模式是否保留 | 儲存庫已移除。線上 `LIVE_AZURE=true` 要留到新程式發布，否則重啟會找已刪除的資料庫 | `webapp/app/main.py` |
+| G-43 | P3 | SQL 作業模式是否保留 | 儲存庫已移除。`LIVE_AZURE` 已於 2026-11-04 從 App Settings 刪除。`main.py` 不讀它。刪除後重啟，`GET /health` 回 200 | `webapp/app/main.py` |
 
 ## 8. 建議的後續順序
 
 1. 核對 G-6、G-7、G-8。這三項決定目前線上路徑還能不能安全地做一次 Reject 演練。
 2. 做 G-24 的 Reject 演練，補上唯一缺少的「現況仍會停在 dry-run」操作證據。
 3. 停用或改寫 `scripts/deploy.ps1` 的 Function 發布段，避免下一次操作誤跑。這是程式變更，需另案同意。
-4. 決定 G-27 與 G-38 的上限，並讓設定、引擎與客戶文件使用同一個數字。
+4. 若第二座工廠要低於 600 的產品上限，必須另外設計。未使用的 100 設定已經移除。
 5. 決定 G-4、G-13、G-31 的殘留資源去留，再寫第二座工廠的參數表。
 6. 若客戶提供可讀的模組設計說明書範本，再把這三份 Markdown 的章節映射到該範本。本次無法從現有 `.docx` 做這件事。
 
@@ -96,7 +96,7 @@
 - 主政策 mode 為 Prevention、state 為 Enabled。
 - 主政策有 `SentinelAutoBlock`（priority 10，6 個 match value）與 `PocSimulatedProbe`（priority 50）。
 - Playbook Enabled，封鎖 URL 指向作業 Web App，不是 Function App。
-- Web App Running，Python 3.11，`LIVE_AZURE=true`，`AUTO_BLOCK_ENABLED=false`，`WAF_PROVIDER=ApplicationGateway`。儲存庫不再讀 `LIVE_AZURE`，線上設定仍保留。
+- Web App Running，Python 3.11，`AUTO_BLOCK_ENABLED=false`，`WAF_PROVIDER=ApplicationGateway`。`LIVE_AZURE` 已於 2026-11-04 刪除。同日 `GET /health` 回 200，主體仍是寫死的 `liveAzure: true` 與 `sql: false`。
 - Azure SQL server、資料庫 `aseops`、私人端點與 `privatelink.database.windows.net` 已刪除。`vnet-app-ase-sentinel-poc-7ttpll74` 的 `snet-app` 仍供 Web App 整合。
 - Function 站點不存在。
 - 範本檔無法當 Office Open XML 讀取。

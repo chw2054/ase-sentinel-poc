@@ -41,7 +41,7 @@ Microsoft Sentinel、Log Analytics、Application Gateway WAF_v2、Logic Apps、A
 操作現有 POC 至少需要：
 
 - 讀取資源群組、WAF 政策、Logic App、Web App 設定的權限。
-- 若要核准：`approverEmail` 所代表的信箱。程式預設與多份文件使用 `admin@mngenvmcap591832.onmicrosoft.com`。線上 `APPROVER_EMAIL` 已設定，本次未核對是否仍是這個地址。
+- 若要核准：playbook 參數 `approverEmail`。Web App 不再有 `APPROVER_EMAIL`。文件預設使用 `admin@mngenvmcap591832.onmicrosoft.com`。本次沒有重讀 playbook 參數值。
 - 若要改政策：Web App 受控識別需要目標政策的寫入權。本次未重讀角色指派，標為待確認。
 
 ### 2.2 工具
@@ -118,7 +118,7 @@ Microsoft Sentinel、Log Analytics、Application Gateway WAF_v2、Logic Apps、A
 
 ### 4.4 Playbook
 
-- 目的：取 IP、dry-run、等候核准、必要時 enforce。
+- 目的：取 IP、送 `awaiting-approval`、等候核准、必要時送 `approved`。
 - 現況：Logic App Enabled，系統受控識別，URL 主機 `app-ase-sentinel-poc-7ttpll74.azurewebsites.net`，路徑 `/api/SentinelWafAutoBlock`，參數含 `functionKey`。
 - 定義來源：`infra/modules/playbook.bicep` 載入 `thin-workflow.json`。
 - 常見問題：重新部署 playbook 模組會碰到 Office 365 連接器。授權遺失時，核准步驟失敗，政策不應變更。失敗後要讀 run 與事件註解，不要只看 Logic App 最終狀態。失敗分支使用 `Terminate` 且 `runStatus` 為 Succeeded，所以 run 顯示成功不代表已封鎖。
@@ -126,10 +126,10 @@ Microsoft Sentinel、Log Analytics、Application Gateway WAF_v2、Logic Apps、A
 ### 4.5 封鎖 API
 
 - 目的：驗證 IP、讀寫 WAF、寫註解、送 Teams。
-- 現況：由 Web App 提供。`APP_ENV=production`，`LIVE_AZURE=true`，`AUTO_BLOCK_ENABLED=false`，`WAF_PROVIDER=ApplicationGateway`。儲存庫已不讀 `LIVE_AZURE`。線上設定仍留 `true`，因為目前部署的程式在重啟時還會讀它。
+- 現況：由 Web App 提供。`APP_ENV=production`，`AUTO_BLOCK_ENABLED=false`，`WAF_PROVIDER=ApplicationGateway`。`LIVE_AZURE` 已於 2026-11-04 從 App Settings 刪除。程式不讀它。
 - 儲存庫沒有一條已核對過、可把 `webapp/` 發布到這個站點的腳本。`scripts/deploy.ps1` 不再發布 Function，也不發布這個 Web App。
 - 發布缺口標為缺少自動化。在補上之前，變更引擎必須沿用當初發布 Web App 的程序，而該程序沒有寫進目前腳本。
-- 驗證：`GET /health` 在程式中回 `liveAzure: true`。該路徑是否被 Easy Auth 排除，本次未測，所以不把 HTTP 200 寫成本次結果。
+- 驗證：2026-11-04 刪除未使用的 App Settings 並重啟後，`GET /health` 回 HTTP 200，主體是 `{"status":"ok","liveAzure":true,"sql":false}`。`liveAzure` 與 `sql` 是 `live.py` 寫死的欄位，不是 App Setting。
 
 ### 4.6 身分與 RBAC
 
@@ -141,7 +141,7 @@ Microsoft Sentinel、Log Analytics、Application Gateway WAF_v2、Logic Apps、A
 
 - Office 365：入口網站打開連接器，以核准人授權。沒有命令列可代替這一步。Bicep 已說明原因。
 - Teams：`NOTIFY_TEAMS_URL` 已在 App Settings，`NOTIFY_TEAMS_AUTH=entra`。URL 不進部署範本，`deploy.ps1` 註明如此，以免留在部署歷史。值不要貼到工單或文件。
-- 驗證：下一筆 dry-run 應產生 `awaiting-approval` 卡片，且 HTTP 狀態仍是 `dry-run`。本次沒有製造這一筆。
+- 驗證：下一筆 `awaiting-approval` 應產生 Status 為 `awaiting-approval` 的卡片，且 HTTP `status` 也是 `awaiting-approval`。本次沒有製造這一筆。
 
 ### 4.8 WAF 整合
 
@@ -157,7 +157,7 @@ Microsoft Sentinel、Log Analytics、Application Gateway WAF_v2、Logic Apps、A
 - [x] 主 WAF 政策 Prevention 且 Enabled。
 - [x] `SentinelAutoBlock` 與 `PocSimulatedProbe` 都在，priority 分別是 10 與 50。
 - [x] Playbook Enabled，URL 指向 Web App 的封鎖 API。
-- [x] Web App Running，`LIVE_AZURE=true`，`AUTO_BLOCK_ENABLED=false`。
+- [x] Web App Running，`AUTO_BLOCK_ENABLED=false`。`LIVE_AZURE` 已刪除。
 - [x] Function App 名稱已確認不存在。
 - [ ] 診斷設定仍把防火牆日誌送到該 workspace。
 - [ ] 分析規則啟用，門檻與 12 小時分組與參數檔一致。
@@ -178,24 +178,23 @@ Microsoft Sentinel、Log Analytics、Application Gateway WAF_v2、Logic Apps、A
 | `WafProvider` | `ApplicationGateway` | 列舉 | 否 | 腳本與 `WAF_PROVIDER` |
 | `WafMode` | `Prevention` | Prevention 或 Detection | 否 | 腳本。線上政策為 Prevention |
 | `DeployTestWaf` | `true` | bool | 否 | 腳本。對現有政策不要設 true |
-| `AutoBlockEnabled` | 腳本預設 `true`；線上 App Setting `false` | JSON boolean，不是字串 `True` | 否 | 腳本會寫 Function 設定。線上實際旗標在 Web App |
+| `AutoBlockEnabled` | 腳本預設 `true`；線上 App Setting `false` | JSON boolean，不是字串 `True` | 否 | 腳本只寫部署輸出。線上旗標是 Web App 的 `AUTO_BLOCK_ENABLED` |
 | `DetectionThreshold` | 3 | 1 到 100 | 否 | 腳本 |
 | `QueryFrequencyMinutes` | 5 | 5 到 60，且不大於 lookback | 否 | 腳本 |
 | `QueryLookbackMinutes` | 30 | 5 到 1440 | 否 | 腳本 |
 | `ProbeMarker` | `ase-poc-probe` | 3 到 40 碼的英數與連字號 | 否 | 腳本與測試腳本 |
 | `ProbeRuleName` / `ProbeRulePriority` | `PocSimulatedProbe` / 50 | 名稱與 1 到 100 | 否 | 腳本。線上 priority 50 |
 | `BlockRuleName` / `BlockRulePriority` | `SentinelAutoBlock` / 10 | 同上 | 否 | 腳本與線上 |
-| `MaximumBlockEntries` | 100 | 腳本允許 1 到 500 | 否 | 線上 App Setting 100。ARM 引擎單規則容量另以 600 計算 |
 | `OverrideProtectedRanges` | `false` | JSON boolean | 否 | 線上亦為 false |
 | `ProtectedIpRanges` | 腳本預設空陣列 | JSON 陣列。prefix 僅 8、16、24、32 | 可能含客戶網路 | 線上有設定，值未摘錄 |
-| `ApproverEmail` | 腳本預設空字串，空字串會讓 playbook 停在評估前 | 電子郵件 | 個人資料 | playbook 參數與 `APPROVER_EMAIL` |
+| `ApproverEmail` | 腳本預設空字串，空字串會讓 playbook 停在評估前 | 電子郵件 | 個人資料 | playbook 參數 `approverEmail`。Web App 不再有 `APPROVER_EMAIL` |
 | `NotifyTeamsUrl` | 空字串則嘗試沿用舊設定 | `https://` URL | 是 | Web App `NOTIFY_TEAMS_URL` |
 | `NotifyEvents` | 腳本預設 `blocked,put_failed,capacity` | 逗號分隔 | 否 | 線上實際為 `would_block,blocked,put_failed,capacity` |
 | `BLOCK_API_KEY` | 無預設值可公開 | 共用祕密 | 是 | Web App 與 playbook `functionKey` |
-| `LIVE_AZURE` | 線上 `true` | 儲存庫已不讀。線上舊程式仍讀 | 否 | 新程式發布前不要刪。刪了之後重啟會走已移除的 SQL 啟動檢查 |
+| `LIVE_AZURE` | 2026-11-04 已刪除 | 程式不讀 | 否 | 刪除後重啟，`GET /health` 回 200 |
 | `APP_ENV` | 線上 `production` | 字串 | 否 | Web App。非 `local` 時拒絕 `DEV_LOGIN_PASSWORD`。不再要求資料庫 |
 
-`execution` 不是 App Setting。它在每次 POST 的 JSON。`enforce` 只應出現在核准之後的第二次呼叫，或已授權的手動維護。
+`execution` 不是 App Setting。它在每次 POST 的 JSON。`approved` 會寫入該次呼叫。`awaiting-approval` 不寫。`dry-run` 與 `enforce` 會被拒絕。
 
 ## 6. 端到端驗證
 
@@ -206,10 +205,10 @@ Microsoft Sentinel、Log Analytics、Application Gateway WAF_v2、Logic Apps、A
 | 產生 WAF 事件 | 知道閘道前端位址。位址本次未重讀 | `scripts/test.ps1 -Target <url> -Count 3` | 探測 URL 回 403，規則為 `PocSimulatedProbe`，除非來源已在 `SentinelAutoBlock` | `AGWFirewallLogs` 的 `RuleId` 與 `ClientIp` | 無政策寫入 |
 | 日誌進入 workspace | 診斷設定正確 | `sentinel/queries/verify-application-gateway.kql` | 查詢有資料列 | 查詢結果的時間與規則 ID | 無 |
 | 開事件 | 同一 IP 在 30 分鐘內至少 3 筆，且不在封鎖規則、私有範圍、watchlist | 等候分析規則，最多約一個排程週期再加處理時間 | 新事件。12 小時內同一 IP 併入原事件，不再 Created | 事件編號、實體 IP | 關閉事件不會自動改 WAF |
-| Playbook | 自動化規則啟用 | 看該事件的 playbook run | 先 POST `execution=dry-run` | run 動作 `Call_block_function` 的狀態碼與 `status` 欄位。不要複製 `x-functions-key` | 無 |
-| Dry-run | `AUTO_BLOCK_ENABLED=false` | 由 playbook 呼叫 | `status=dry-run`，`changed=false`，註解含 `Would block IP` | 事件註解與 PUT 前的 match value 數量 | 無 |
+| Playbook | 自動化規則啟用 | 看該事件的 playbook run | 先 POST `execution=awaiting-approval` | run 動作 `Call_block_function` 的狀態碼與 `status` 欄位。不要複製 `x-functions-key` | 無 |
+| Awaiting approval | `AUTO_BLOCK_ENABLED=false` | 由 playbook 呼叫 | `status=awaiting-approval`，`changed=false`，註解含 `Would block IP` | 事件註解與 PUT 前的 match value 數量 | 無 |
 | Reject | 核准信可達 | 選 Reject | 註解說明未選擇 Approve，政策不變 | 核准動作輸出不含祕密的選項文字、match value 數量不變 | 無 |
-| Approve 後寫入 | 核准人與 RBAC 正確 | 選 Approve | 第二次 `execution=enforce`，`status=blocked`，`changed=true` | 政策比對，只多出該 IP。註解不再叫人假設 | 依第 8 章移除該 IP |
+| Approve 後寫入 | 核准人與 RBAC 正確 | 選 Approve | 第二次 `execution=approved`，`status=approved`，`changed=true` | 政策比對，只多出該 IP。註解不再叫人假設 | 依第 8 章移除該 IP |
 | 重複 IP | 位址已在規則內 | 再觸發一次 | `already-blocked`，不寄核准信，不 PUT | run 與註解 | 無 |
 | 無效 IP | 實體不是單一公開 IPv4 | 引擎單測在 `webapp/tests/engine/test_addresses.py` | 拒絕，不讀或不寫政策，視失敗點而定 | 單測或註解中的 reason | 無 |
 | 呼叫失敗 | API 金鑰錯誤或站點不可達 | 不要在正式視窗故意做 | 註解寫明不要假設政策已改，run 仍可能 Succeeded | 註解與站點日誌 | 讀政策確認 |
